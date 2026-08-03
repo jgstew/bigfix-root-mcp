@@ -9,7 +9,9 @@ from tests.conftest import FakeBESConnection, FakeRESTResult
 
 
 def make_results_envelope(rows):
-    return {"results": rows, "totalResults": len(rows)}
+    # the real server returns exactly one key, "results" - no count, no
+    # completion flag (see docs/client-query.md)
+    return {"results": rows}
 
 
 def queue_results(conn, row_sets):

@@ -44,7 +44,14 @@ mcp = FastMCP(
         "session_relevance_query for data already reported to the server "
         "(fast, no client round-trip). Use the client_query tools to ask "
         "live questions of BigFix agents; those results accumulate over "
-        "seconds to minutes as clients report in."
+        "seconds to minutes as clients report in.\n\n"
+        "SCOPE: every result is limited to what the configured operator can "
+        "see. Only a master operator has full visibility; a non-master "
+        "operator can never be certain its view of BigFix is complete, and "
+        "cannot distinguish 'does not exist' from 'outside my scope'. Check "
+        "whoami (is_main_operator) before describing any result as the state "
+        "of BigFix overall, and otherwise report results as visible to this "
+        "operator."
     ),
 )
 
@@ -52,7 +59,9 @@ mcp = FastMCP(
 TARGETING_DESCRIPTION = (
     "Targeting: set exactly one of target_all, target_computer_ids, "
     "target_computer_names, or target_relevance (client relevance evaluated "
-    "on each agent to decide applicability)."
+    "on each agent to decide applicability). Targeting is limited to the "
+    "configured operator's scope, so target_all means all computers this "
+    "operator can see, not necessarily all computers in BigFix."
 )
 
 
@@ -74,6 +83,11 @@ def session_relevance_query(
     There is no server-side result limit, so bound large result sets in the
     relevance itself (e.g. 'firsts 100 of bes computers'). Returns the raw
     JSON envelope: {"result": [...], "evaltime_ms": ...}.
+
+    Results are evaluated within the configured operator's scope. Unless
+    whoami reports is_main_operator, counts and lists are a lower bound on
+    what exists - report them as visible to this operator, not as the
+    complete state of BigFix.
     """
     conn = connection.get_connection()
     envelope = conn.session_relevance_json(relevance)
@@ -286,7 +300,8 @@ def get_computer_group(
                     "resource": group.attrib.get("Resource", ""),
                 }
     raise ToolError(
-        f"Computer group '{group_name}' not found in site '{site_path}'."
+        f"Computer group '{group_name}' not found in site '{site_path}' - it "
+        "may not exist, or may not be visible to the configured operator."
     )
 
 
@@ -299,7 +314,10 @@ def get_operator(
     conn = connection.get_connection()
     user = conn.get_user(user_name)  # RESTResult, or None when not found
     if user is None:
-        raise ToolError(f"Operator '{user_name}' not found.")
+        raise ToolError(
+            f"Operator '{user_name}' not found - it may not exist, or may not "
+            "be visible to the configured operator."
+        )
     return user.besdict
 
 
@@ -321,7 +339,10 @@ def get_dashboard_variable(
 def whoami() -> dict:
     """Show the configured connection: user, root server, main operator status.
 
-    Cheap connectivity and permission smoke test.
+    Cheap connectivity and permission smoke test. is_main_operator tells you
+    whether results from the other tools can be treated as the full state of
+    BigFix (master operator) or only as this operator's scoped view, which
+    may be incomplete in ways this operator cannot detect.
     """
     conn = connection.get_connection()
     return {

@@ -90,6 +90,18 @@ npx @modelcontextprotocol/inspector bigfix-root-mcp
 then call `whoami`, `session_relevance_query` with `number of bes computers`,
 and `client_query` targeting a known computer ID.
 
+### Operator scope
+
+Every result is limited to what the configured REST operator can see. Only a
+**master operator** has full visibility; a regular operator can never be
+certain its view is complete, and cannot distinguish "does not exist" from
+"outside my scope". So `number of bes computers` returning 35 means *35
+computers visible to this operator* — a lower bound, not the BigFix total.
+
+`whoami` reports `is_main_operator` for exactly this reason: check it before
+treating any result as the full state of BigFix. The tool descriptions carry
+this caveat so LLM clients don't overstate scoped results.
+
 ## Safety and design notes
 
 - **Read-only surface**: only the tools above are registered; no mutating
@@ -107,6 +119,15 @@ and `client_query` targeting a known computer ID.
   `BES_SSL_VERIFY=true` (or a CA bundle path) for anything beyond a lab.
 - Generic BigFix logic here is written to be upstreamed into besapi — see
   [docs/besapi-proposals.md](docs/besapi-proposals.md).
+
+## Documentation
+
+| Doc | Contents |
+| --- | --- |
+| [client-query.md](docs/client-query.md) | Client fast query protocol reference: endpoints, payloads, live-captured result schema, termination heuristics and their tradeoffs. |
+| [besapi-notes.md](docs/besapi-notes.md) | besapi behaviors this wrapper depends on or works around (error surfacing, connection lifecycle, return shapes, site-path state). |
+| [design-decisions.md](docs/design-decisions.md) | Why the server is shaped this way, plus FastMCP 4 beta specifics. |
+| [besapi-proposals.md](docs/besapi-proposals.md) | Proposed upstream besapi changes that would let this project shrink. |
 
 ## Development
 
