@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "bigfix-root": {
+      "command": "uvx",
+      "args": ["bigfix-root-mcp"],
+      "env": {
+        "BES_ROOT_SERVER": "https://<ROOT_SERVER_HOST>:52311",
+        "BES_USER_NAME": "<BES_USER_NAME>",
+        "BES_PASSWORD": "<BES_PASSWORD>"
+      }
+    }
+  }
+}

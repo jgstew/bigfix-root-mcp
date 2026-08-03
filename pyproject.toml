@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bigfix-root-mcp"
+description = "A minimal read-only MCP server around the besapi library (BigFix REST API)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dynamic = ["version"]
+dependencies = [
+    "besapi>=4.1.5",
+    "fastmcp==4.0.0b1",
+]
+
+[project.urls]
+Homepage = "https://github.com/jgstew/bigfix-root-mcp"
+
+[project.scripts]
+bigfix-root-mcp = "bigfix_root_mcp.server:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "bigfix_root_mcp.__version__" }
+
+# fastmcp 4.0.0b1 is a meta-package over fastmcp-slim; uv only allows
+# prereleases for explicitly named packages, so constrain the transitive dep:
+[tool.uv]
+constraint-dependencies = ["fastmcp-slim==4.0.0b1"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
