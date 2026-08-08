@@ -21,7 +21,6 @@ import asyncio
 import json
 import time
 import xml.sax.saxutils
-from typing import Optional
 
 
 def _check_status(result):
@@ -33,10 +32,10 @@ def _check_status(result):
 def build_target_xml(
     *,
     target_all: bool = False,
-    computer_ids: Optional[list[int]] = None,
-    computer_names: Optional[list[str]] = None,
-    target_relevance: Optional[str] = None,
-) -> "tuple[str, Optional[int]]":
+    computer_ids: list[int] | None = None,
+    computer_names: list[str] | None = None,
+    target_relevance: str | None = None,
+) -> "tuple[str, int | None]":
     """Build ClientQuery Target XML from exactly one targeting mode.
 
     Returns (target_xml, expected_count) where expected_count is the number
@@ -59,7 +58,12 @@ def build_target_xml(
         )
 
     if target_all:
-        return "<AllComputers>true</AllComputers>", None
+        # NOT <AllComputers>true</AllComputers>: a BigFix 11 root server
+        # rejects that element with "400 XML parsing error: no declaration
+        # found for element 'AllComputers'", even though besapi's
+        # get_target_xml emits it. Client relevance TRUE is applicable on
+        # every agent and is accepted. Verified live - docs/rest-endpoints.md.
+        return "<CustomRelevance>TRUE</CustomRelevance>", None
 
     if computer_ids:
         xml_out = "".join(f"<ComputerID>{int(cid)}</ComputerID>" for cid in computer_ids)
@@ -109,8 +113,7 @@ def submit_client_query(conn, query_text: str, target_xml: str) -> int:
         return int(result.besobj.ClientQuery.ID)
     except (AttributeError, TypeError, ValueError) as err:
         raise ValueError(
-            "BigFix did not return a client query ID. Response was: "
-            + str(result.text)[:500]
+            "BigFix did not return a client query ID. Response was: " + str(result.text)[:500]
         ) from err
 
 
@@ -120,9 +123,7 @@ def fetch_client_query_results(conn, query_id: int) -> dict:
     if native is not None:
         return native(query_id)
 
-    result = _check_status(
-        conn.get(conn.url(f"clientqueryresults/{int(query_id)}?output=json"))
-    )
+    result = _check_status(conn.get(conn.url(f"clientqueryresults/{int(query_id)}?output=json")))
     return json.loads(result.text)
 
 
@@ -154,8 +155,8 @@ async def poll_client_query(
     *,
     timeout_seconds: float = 60,
     poll_interval_seconds: float = 5,
-    stable_polls: int = 2,
-    expected_count: Optional[int] = None,
+    stable_polls: int = 3,
+    expected_count: int | None = None,
     progress_cb=None,
 ) -> dict:
     """Poll client query results until a termination condition is met.

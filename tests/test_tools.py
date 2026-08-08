@@ -6,9 +6,10 @@ import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
-from bigfix_root_mcp import server
+from bigfix_root_mcp import response, server
 from tests.conftest import FakeRESTResult
 from tests.test_clientquery import SUBMIT_RESPONSE_XML, make_results_envelope
+from tests.test_content import SITES_XML
 
 
 async def call(tool, arguments=None):
@@ -21,9 +22,7 @@ class TestSessionRelevance:
         fake_conn.relevance_responses.append(
             {"result": ["computer1", "computer2"], "evaltime_ms": 12}
         )
-        result = await call(
-            "session_relevance_query", {"relevance": "names of bes computers"}
-        )
+        result = await call("session_relevance_query", {"relevance": "names of bes computers"})
         assert result.data["result"] == ["computer1", "computer2"]
         assert result.data["evaltime_ms"] == 12
         assert fake_conn.calls[0][:2] == (
@@ -61,9 +60,7 @@ class TestClientQueryTools:
 
     async def test_results_summarized(self, fake_conn):
         rows = [{"computerID": 1, "result": "a"}, {"computerID": 2, "result": "b"}]
-        fake_conn.get_responses.append(
-            FakeRESTResult(text=json.dumps(make_results_envelope(rows)))
-        )
+        fake_conn.get_responses.append(FakeRESTResult(text=json.dumps(make_results_envelope(rows))))
         result = await call("client_query_results", {"query_id": 42})
         assert result.data["reported_count"] == 2
         assert result.data["results"] == rows
@@ -73,9 +70,7 @@ class TestClientQueryTools:
         fake_conn.get_responses.extend(
             [
                 FakeRESTResult(
-                    text=json.dumps(
-                        make_results_envelope([{"computerID": 10, "result": "a"}])
-                    )
+                    text=json.dumps(make_results_envelope([{"computerID": 10, "result": "a"}]))
                 ),
                 FakeRESTResult(
                     text=json.dumps(
@@ -167,9 +162,7 @@ class TestOtherTools:
         }
 
     async def test_api_get(self, fake_conn):
-        fake_conn.get_responses.append(
-            FakeRESTResult(text="<BESAPI>help text</BESAPI>")
-        )
+        fake_conn.get_responses.append(FakeRESTResult(text="<BESAPI>help text</BESAPI>"))
         result = await call("api_get", {"path": "/api/help"})
         assert result.data["status_code"] == 200
         assert "help text" in result.data["text"]
@@ -181,11 +174,164 @@ class TestOtherTools:
             await call("api_get", {"path": "https://evil.example.com/steal"})
 
     async def test_api_get_http_error(self, fake_conn):
-        fake_conn.get_responses.append(
-            FakeRESTResult(text="Not Found", status_code=404)
-        )
+        fake_conn.get_responses.append(FakeRESTResult(text="Not Found", status_code=404))
         with pytest.raises(ToolError, match="404"):
             await call("api_get", {"path": "nonexistent"})
+
+
+class TestResponseShaping:
+    """No tool may return an unbounded payload without saying it was cut."""
+
+    async def test_session_relevance_bounds_large_result(self, fake_conn):
+        fake_conn.relevance_responses.append(
+            {"result": [f"computer{i}" for i in range(1000)], "evaltime_ms": 900}
+        )
+        result = await call("session_relevance_query", {"relevance": "bes computers"})
+        assert len(result.data["result"]) == response.DEFAULT_LIMIT
+        assert result.data["truncated"] is True
+        assert result.data["total_available"] == 1000
+        # metadata from the envelope must survive bounding
+        assert result.data["evaltime_ms"] == 900
+
+    async def test_session_relevance_honors_limit_and_offset(self, fake_conn):
+        fake_conn.relevance_responses.append({"result": list(range(10)), "evaltime_ms": 1})
+        result = await call(
+            "session_relevance_query",
+            {"relevance": "bes computers", "limit": 3, "offset": 5},
+        )
+        assert result.data["result"] == [5, 6, 7]
+        assert result.data["offset"] == 5
+        assert result.data["truncated"] is True
+
+    async def test_session_relevance_small_result_not_flagged(self, fake_conn):
+        fake_conn.relevance_responses.append({"result": ["a"], "evaltime_ms": 1})
+        result = await call("session_relevance_query", {"relevance": "x"})
+        assert result.data["truncated"] is False
+        assert result.data["total_available"] == 1
+
+    async def test_client_query_results_bounds_rows(self, fake_conn):
+        rows = [{"computerID": i, "result": "x"} for i in range(1000)]
+        fake_conn.get_responses.append(FakeRESTResult(text=json.dumps(make_results_envelope(rows))))
+        result = await call("client_query_results", {"query_id": 42, "limit": 10})
+        assert len(result.data["results"]) == 10
+        assert result.data["truncated"] is True
+        # counts describe the whole query, not the returned window
+        assert result.data["reported_count"] == 1000
+        assert result.data["result_row_count"] == 1000
+
+    async def test_api_get_reports_total_chars(self, fake_conn):
+        fake_conn.get_responses.append(FakeRESTResult(text="y" * 100))
+        result = await call("api_get", {"path": "help", "max_chars": 10})
+        assert result.data["text"] == "y" * 10
+        assert result.data["truncated"] is True
+        assert result.data["total_chars"] == 100
+
+    async def test_list_sites_has_stable_bounded_shape(self, fake_conn):
+        fake_conn.get_responses.append(FakeRESTResult(text="<BESAPI/>"))
+        result = await call("list_sites")
+        assert result.data["truncated"] is False
+        assert result.data["data"] is not None
+
+
+class TestReadCoverageTools:
+    """Paths asserted here were confirmed live via /api/help."""
+
+    async def test_get_computer(self, fake_conn):
+        fake_conn.get_responses.append(
+            FakeRESTResult(text="<BESAPI><Computer><ID>7</ID></Computer></BESAPI>")
+        )
+        result = await call("get_computer", {"computer_id": 7})
+        assert result.data["truncated"] is False
+        assert fake_conn.calls[0][1] == "computer/7"
+
+    async def test_applicable_fixlets(self, fake_conn):
+        fake_conn.get_responses.append(FakeRESTResult(text="<BESAPI/>"))
+        await call("applicable_fixlets", {"computer_id": 7})
+        assert fake_conn.calls[0][1] == "computer/7/fixlets"
+
+    async def test_get_action_status(self, fake_conn):
+        fake_conn.get_responses.append(FakeRESTResult(text="<BESAPI/>"))
+        await call("get_action_status", {"action_id": 900})
+        assert fake_conn.calls[0][1] == "action/900/status"
+
+    async def test_get_action(self, fake_conn):
+        fake_conn.get_responses.append(FakeRESTResult(text="<BESAPI/>"))
+        await call("get_action", {"action_id": 900})
+        assert fake_conn.calls[0][1] == "action/900"
+
+    async def test_list_actions(self, fake_conn):
+        fake_conn.get_responses.append(FakeRESTResult(text="<BESAPI/>"))
+        await call("list_actions")
+        assert fake_conn.calls[0][1] == "actions"
+
+    async def test_get_content_by_kind(self, fake_conn):
+        fake_conn.get_responses.append(FakeRESTResult(text="<BESAPI/>"))
+        await call(
+            "get_content",
+            {"kind": "task", "site_path": "custom/MySite", "content_id": 12},
+        )
+        assert fake_conn.calls[0][1] == "task/custom/MySite/12"
+
+    async def test_get_content_rejects_traversal(self, fake_conn):
+        with pytest.raises(ToolError, match=r"\.\."):
+            await call(
+                "get_content",
+                {"kind": "task", "site_path": "master/../../rd", "content_id": 12},
+            )
+        assert fake_conn.calls == []
+
+    async def test_find_computers_is_bounded(self, fake_conn):
+        fake_conn.relevance_responses.append(
+            {"result": [[f"host{i}", i] for i in range(200)], "evaltime_ms": 5}
+        )
+        result = await call("find_computers", {"name_contains": "host", "limit": 10})
+        assert len(result.data["result"]) == 10
+        assert result.data["total_available"] == 200
+        assert 'contains "host"' in fake_conn.calls[0][1]
+
+    async def test_find_content_uses_kind_inspector(self, fake_conn):
+        fake_conn.relevance_responses.append({"result": [], "evaltime_ms": 1})
+        fake_conn.get_responses.append(FakeRESTResult(text="<BESAPI/>"))
+        await call("find_content", {"kind": "analysis", "name_contains": "cpu"})
+        assert "bes analyses" in fake_conn.calls[0][1]
+
+    async def test_find_content_resolves_site_path_for_get_content(self, fake_conn):
+        """The find -> get handoff: relevance gives a site name, not a path."""
+        fake_conn.relevance_responses.append(
+            {"result": [["Fix A", 1, "BES Support"]], "evaltime_ms": 1}
+        )
+        fake_conn.get_responses.append(FakeRESTResult(text=SITES_XML))
+        result = await call("find_content", {"kind": "fixlet", "name_contains": "fix"})
+        row = result.data["result"][0]
+        assert row["site_path"] == "external/BES%20Support"
+        assert row["id"] == 1
+
+    async def test_find_content_rejects_quote_in_term(self, fake_conn):
+        with pytest.raises(ToolError, match="double quote"):
+            await call("find_content", {"kind": "fixlet", "name_contains": 'a" of x'})
+
+    async def test_list_operators_and_roles(self, fake_conn):
+        fake_conn.get_responses.extend(
+            [FakeRESTResult(text="<BESAPI/>"), FakeRESTResult(text="<BESAPI/>")]
+        )
+        await call("list_operators")
+        await call("list_roles")
+        assert fake_conn.calls[0][1] == "operators"
+        assert fake_conn.calls[1][1] == "roles"
+
+    async def test_validate_bes_xml_makes_no_server_call(self, fake_conn):
+        result = await call("validate_bes_xml", {"bes_xml": "<notbes/>"})
+        assert result.data["valid"] is False
+        assert fake_conn.calls == []
+
+    async def test_get_computer_group_rejects_traversal(self, fake_conn):
+        """Regression: the old code passed 'master/../../x' straight through."""
+        with pytest.raises(ToolError, match=r"\.\."):
+            await call(
+                "get_computer_group",
+                {"group_name": "g", "site_path": "master/../../rd"},
+            )
+        assert fake_conn.calls == []
 
 
 class TestToolSurface:
@@ -205,4 +351,15 @@ class TestToolSurface:
             "get_dashboard_variable",
             "whoami",
             "api_get",
+            "get_computer",
+            "find_computers",
+            "applicable_fixlets",
+            "get_action",
+            "get_action_status",
+            "list_actions",
+            "find_content",
+            "get_content",
+            "list_operators",
+            "list_roles",
+            "validate_bes_xml",
         }

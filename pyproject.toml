@@ -29,6 +29,11 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# the MCP resources are markdown files read at runtime via importlib.resources;
+# without this they are missing from the wheel and every resource read fails
+[tool.setuptools.package-data]
+bigfix_root_mcp = ["resources/*.md"]
+
 [tool.setuptools.dynamic]
 version = { attr = "bigfix_root_mcp.__version__" }
 

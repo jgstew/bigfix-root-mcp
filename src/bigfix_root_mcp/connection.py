@@ -16,7 +16,6 @@ import configparser
 import dataclasses
 import logging
 import os
-from typing import Optional, Union
 
 import besapi.besapi
 
@@ -35,6 +34,21 @@ class ConnectionConfigError(RuntimeError):
     """No usable BigFix connection configuration was found."""
 
 
+def writes_enabled() -> bool:
+    """Whether the gated write tools should be registered.
+
+    Read at import time by server.py. Off unless BIGFIX_ALLOW_WRITES is
+    explicitly truthy: the flag exists only because write tools exist, and
+    when it is off those tools are absent from the tool list entirely rather
+    than registered and erroring - the registered tool list is the boundary.
+    """
+    return os.environ.get("BIGFIX_ALLOW_WRITES", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class BESConfig:
     """Resolved BigFix REST API connection settings."""
@@ -43,10 +57,10 @@ class BESConfig:
     username: str
     password: str
     # False (besapi default) | True | path to a CA bundle:
-    verify: Union[bool, str] = False
+    verify: bool | str = False
 
 
-def _parse_verify(value: str) -> Union[bool, str]:
+def _parse_verify(value: str) -> bool | str:
     lowered = value.strip().lower()
     if lowered in ("", "0", "false", "no"):
         return False
@@ -92,8 +106,7 @@ def load_config() -> BESConfig:
         raise ConnectionConfigError(
             "No BigFix connection configuration found. Set BES_ROOT_SERVER, "
             "BES_USER_NAME and BES_PASSWORD environment variables, or create a "
-            "besapi.conf file with a [besapi] section in one of: "
-            + ", ".join(CONFIG_PATHS)
+            "besapi.conf file with a [besapi] section in one of: " + ", ".join(CONFIG_PATHS)
         )
 
     return BESConfig(
@@ -104,7 +117,7 @@ def load_config() -> BESConfig:
     )
 
 
-_conn: Optional[besapi.besapi.BESConnection] = None
+_conn: besapi.besapi.BESConnection | None = None
 
 
 def get_connection() -> besapi.besapi.BESConnection:

@@ -10,19 +10,29 @@ connection state (set_current_site_path / get_current_site_path); tools
 that need a site take an explicit site_path parameter.
 """
 
+import importlib.resources
 import json
 import logging
 import sys
-from typing import Annotated, Optional
+from typing import Annotated
 
 import besapi.besapi
-
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.server.context import Context
 from pydantic import Field
 
-from bigfix_root_mcp import __version__, clientquery, connection
+from bigfix_root_mcp import (
+    __version__,
+    actions,
+    besxml,
+    clientquery,
+    connection,
+    content,
+    prompts,
+    response,
+    writes,
+)
 from bigfix_root_mcp.errors import (
     bes_errors,
     check_relevance_envelope,
@@ -34,7 +44,33 @@ logger = logging.getLogger(__name__)
 # protect the root server from abusive polling parameters:
 MAX_TIMEOUT_SECONDS = 600
 MIN_POLL_INTERVAL_SECONDS = 2
-API_GET_MAX_TEXT = 50_000
+
+# read once at import: the write tools below are registered only if this is on
+WRITES_ENABLED = connection.writes_enabled()
+
+LIMIT_FIELD = Field(
+    default=None,
+    description=(
+        f"Max rows to return (default {response.DEFAULT_LIMIT}). The response "
+        "reports total_available and truncated."
+    ),
+)
+OFFSET_FIELD = Field(default=0, description="Row offset, for paging through results.")
+
+
+def _bound_rows(payload: dict, key: str, limit, offset) -> dict:
+    """Window the row list under `key`, merging the bounding metadata in.
+
+    Counts already computed by the caller (reported_count, evaltime_ms...)
+    describe the whole result set and are left untouched: they answer "how big
+    is the answer", which stays true regardless of how much of it was returned.
+    """
+    bounded = response.bound_list(payload.get(key) or [], limit=limit, offset=offset)
+    out = dict(payload)
+    out[key] = bounded.pop("items")
+    out.update(bounded)
+    return out
+
 
 mcp = FastMCP(
     name="bigfix-root-mcp",
@@ -56,6 +92,70 @@ mcp = FastMCP(
 )
 
 
+# --------------------------------------------------------------------------
+# Reference resources. Static markdown shipped in the package: relevance is
+# the hard part for a model, and a cookbook it can pull on demand beats
+# stuffing the same guidance into every tool description.
+# --------------------------------------------------------------------------
+
+_RESOURCES = {
+    "bigfix://relevance/session-cookbook": (
+        "session-cookbook.md",
+        "Session relevance cookbook",
+        (
+            "Working session relevance expressions, verified against a live root "
+            "server, plus the operators that do not exist."
+        ),
+    ),
+    "bigfix://relevance/client-cookbook": (
+        "client-cookbook.md",
+        "Client relevance cookbook",
+        ("Client (fast query) relevance, targeting forms, and how to read " "cumulative results."),
+    ),
+    "bigfix://guide/tools": (
+        "tool-guide.md",
+        "Tool selection guide",
+        (
+            "Which tool answers which question, how to read bounded responses, "
+            "and what operator scope means for any answer."
+        ),
+    ),
+}
+
+
+def _read_resource_file(filename: str) -> str:
+    return (
+        importlib.resources.files(__package__)
+        .joinpath("resources", filename)
+        .read_text(encoding="utf-8")
+    )
+
+
+def _make_loader(filename: str):
+    """Build a zero-argument loader.
+
+    It has to take no parameters at all: FastMCP reads any function parameter
+    as a URI template variable, and these URIs are static.
+    """
+
+    def _load() -> str:
+        return _read_resource_file(filename)
+
+    return _load
+
+
+def _register_resources() -> None:
+    """Register each markdown file as an MCP resource."""
+    for uri, (filename, name, description) in _RESOURCES.items():
+        mcp.resource(uri, name=name, description=description, mime_type="text/markdown")(
+            _make_loader(filename)
+        )
+
+
+_register_resources()
+prompts.register_prompts(mcp)
+
+
 TARGETING_DESCRIPTION = (
     "Targeting: set exactly one of target_all, target_computer_ids, "
     "target_computer_names, or target_relevance (client relevance evaluated "
@@ -72,6 +172,8 @@ def session_relevance_query(
         str,
         Field(description="A BigFix session relevance expression to evaluate."),
     ],
+    limit: Annotated[int | None, LIMIT_FIELD] = None,
+    offset: Annotated[int, OFFSET_FIELD] = 0,
 ) -> dict:
     """Evaluate a BigFix session relevance query on the root server.
 
@@ -80,9 +182,14 @@ def session_relevance_query(
     Examples: 'number of bes computers', '(name of it, id of it) of bes
     computers whose (now - last report time of it < 1 * day)'.
 
-    There is no server-side result limit, so bound large result sets in the
-    relevance itself (e.g. 'firsts 100 of bes computers'). Returns the raw
-    JSON envelope: {"result": [...], "evaltime_ms": ...}.
+    There is no way to limit rows in the relevance itself - 'first',
+    'firsts', 'items' and 'elements' are all undefined operators on a BigFix
+    root server. Use the limit/offset parameters instead; the response reports
+    total_available and truncated. Note the server still evaluates the whole
+    query, so limit bounds the response, not the work.
+
+    Returns the JSON envelope: {"result": [...], "evaltime_ms": ...} plus
+    bounding metadata.
 
     Results are evaluated within the configured operator's scope. Unless
     whoami reports is_main_operator, counts and lists are a lower bound on
@@ -91,7 +198,7 @@ def session_relevance_query(
     """
     conn = connection.get_connection()
     envelope = conn.session_relevance_json(relevance)
-    return check_relevance_envelope(envelope)
+    return _bound_rows(check_relevance_envelope(envelope), "result", limit, offset)
 
 
 @mcp.tool(description=f"Submit a BigFix client (fast) query. {TARGETING_DESCRIPTION}")
@@ -101,17 +208,15 @@ def client_query_submit(
         str,
         Field(description="Client relevance to evaluate on each targeted agent."),
     ],
-    target_all: Annotated[
-        bool, Field(description="Target all computers.")
-    ] = False,
+    target_all: Annotated[bool, Field(description="Target all computers.")] = False,
     target_computer_ids: Annotated[
-        Optional[list[int]], Field(description="Target these BigFix computer IDs.")
+        list[int] | None, Field(description="Target these BigFix computer IDs.")
     ] = None,
     target_computer_names: Annotated[
-        Optional[list[str]], Field(description="Target these computer names.")
+        list[str] | None, Field(description="Target these computer names.")
     ] = None,
     target_relevance: Annotated[
-        Optional[str],
+        str | None,
         Field(description="Client relevance targeting expression."),
     ] = None,
 ) -> dict:
@@ -136,19 +241,23 @@ def client_query_submit(
 @mcp.tool
 @bes_errors("client_query_results")
 def client_query_results(
-    query_id: Annotated[
-        int, Field(description="Query ID returned by client_query_submit.")
-    ],
+    query_id: Annotated[int, Field(description="Query ID returned by client_query_submit.")],
+    limit: Annotated[int | None, LIMIT_FIELD] = None,
+    offset: Annotated[int, OFFSET_FIELD] = 0,
 ) -> dict:
     """Fetch current results for a previously submitted client fast query.
 
     Results are cumulative and there is no completion flag: safe and cheap
     to call repeatedly until reported_count stops growing or the expected
     number of computers have reported.
+
+    reported_count and result_row_count always describe the full result set;
+    the returned rows are windowed by limit/offset.
     """
     conn = connection.get_connection()
     envelope = clientquery.fetch_client_query_results(conn, query_id)
-    return clientquery.summarize_results(envelope, query_id)
+    summary = clientquery.summarize_results(envelope, query_id)
+    return _bound_rows(summary, "results", limit, offset)
 
 
 @mcp.tool(
@@ -164,17 +273,15 @@ async def client_query(
         Field(description="Client relevance to evaluate on each targeted agent."),
     ],
     ctx: Context,
-    target_all: Annotated[
-        bool, Field(description="Target all computers.")
-    ] = False,
+    target_all: Annotated[bool, Field(description="Target all computers.")] = False,
     target_computer_ids: Annotated[
-        Optional[list[int]], Field(description="Target these BigFix computer IDs.")
+        list[int] | None, Field(description="Target these BigFix computer IDs.")
     ] = None,
     target_computer_names: Annotated[
-        Optional[list[str]], Field(description="Target these computer names.")
+        list[str] | None, Field(description="Target these computer names.")
     ] = None,
     target_relevance: Annotated[
-        Optional[str],
+        str | None,
         Field(description="Client relevance targeting expression."),
     ] = None,
     timeout_seconds: Annotated[
@@ -194,7 +301,7 @@ async def client_query(
         ),
     ] = 2,
     expected_count: Annotated[
-        Optional[int],
+        int | None,
         Field(
             description=(
                 "Stop once this many computers reported. Defaults to the "
@@ -202,6 +309,8 @@ async def client_query(
             )
         ),
     ] = None,
+    limit: Annotated[int | None, LIMIT_FIELD] = None,
+    offset: Annotated[int, OFFSET_FIELD] = 0,
 ) -> dict:
     """Submit a client fast query, poll for results, return them when done.
 
@@ -233,11 +342,9 @@ async def client_query(
     )
 
     async def progress_cb(reported, expected, message):
-        await ctx.report_progress(
-            progress=reported, total=expected, message=message
-        )
+        await ctx.report_progress(progress=reported, total=expected, message=message)
 
-    return await clientquery.poll_client_query(
+    summary = await clientquery.poll_client_query(
         conn,
         query_id,
         timeout_seconds=timeout_seconds,
@@ -246,6 +353,7 @@ async def client_query(
         expected_count=expected_count,
         progress_cb=progress_cb,
     )
+    return _bound_rows(summary, "results", limit, offset)
 
 
 @mcp.tool
@@ -260,10 +368,19 @@ def get_server_info() -> dict:
 @mcp.tool
 @bes_errors("list_sites")
 def list_sites() -> dict:
-    """List all sites visible to the configured operator."""
+    """List all sites visible to the configured operator.
+
+    Returns {"data": <site listing>, "truncated": ..., "total_chars": ...}.
+    A deployment subscribed to many external content sites can produce a large
+    listing; when it exceeds the size cap, data is null and note says so
+    rather than handing back a half-cut structure that looks complete.
+    """
     conn = connection.get_connection()
     result = check_rest_result(conn.get("sites"), "list_sites")
-    return result.besdict
+    return response.bound_mapping(
+        besxml.xml_to_dict(result.text),
+        hint="Try session_relevance_query 'names of bes sites' instead.",
+    )
 
 
 @mcp.tool
@@ -287,22 +404,204 @@ def get_computer_group(
     "current site path" connection state this server avoids.
     """
     conn = connection.get_connection()
-    result = check_rest_result(
-        conn.get(f"computergroups/{site_path}"), "get_computer_group"
-    )
-    groups = getattr(result.besobj, "ComputerGroup", None)
-    if groups is not None:
-        for group in groups:
-            if group_name == str(group.Name):
-                return {
-                    "name": group_name,
-                    "site_path": site_path,
-                    "resource": group.attrib.get("Resource", ""),
-                }
+    group = content.get_computer_group_by_name(conn, group_name, site_path)
+    if group is not None:
+        return group
     raise ToolError(
         f"Computer group '{group_name}' not found in site '{site_path}' - it "
         "may not exist, or may not be visible to the configured operator."
     )
+
+
+@mcp.tool
+@bes_errors("get_computer")
+def get_computer(
+    computer_id: Annotated[int, Field(description="BigFix computer ID.")],
+) -> dict:
+    """Get one computer's full record from /api/computer/{id}.
+
+    Includes the reported properties BigFix holds for that computer. Use
+    find_computers first if you only know part of the name.
+    """
+    conn = connection.get_connection()
+    result = check_rest_result(content.get_computer(conn, computer_id), "get_computer")
+    return response.bound_mapping(
+        besxml.xml_to_dict(result.text),
+        hint="Use session_relevance_query to select specific properties instead.",
+    )
+
+
+@mcp.tool
+@bes_errors("find_computers")
+def find_computers(
+    name_contains: Annotated[
+        str, Field(description="Case-insensitive substring of the computer name.")
+    ],
+    limit: Annotated[int | None, LIMIT_FIELD] = None,
+    offset: Annotated[int, OFFSET_FIELD] = 0,
+) -> dict:
+    """Find computers whose name contains a substring.
+
+    Returns (name, id, last report time) rows. The search term cannot contain
+    a double quote - BigFix relevance string literals have no escape for one.
+    """
+    conn = connection.get_connection()
+    relevance = content.build_computer_search_relevance(name_contains)
+    envelope = conn.session_relevance_json(relevance)
+    return _bound_rows(check_relevance_envelope(envelope), "result", limit, offset)
+
+
+@mcp.tool
+@bes_errors("applicable_fixlets")
+def applicable_fixlets(
+    computer_id: Annotated[int, Field(description="BigFix computer ID.")],
+) -> dict:
+    """Content currently relevant to one computer (/api/computer/{id}/fixlets).
+
+    This is the patch/compliance question: what BigFix currently considers
+    applicable to that machine.
+    """
+    conn = connection.get_connection()
+    result = check_rest_result(
+        content.get_computer_fixlets(conn, computer_id), "applicable_fixlets"
+    )
+    return response.bound_mapping(
+        besxml.xml_to_dict(result.text),
+        hint=("Use session_relevance_query for a counted or filtered view of " "relevant content."),
+    )
+
+
+@mcp.tool
+@bes_errors("get_action")
+def get_action(
+    action_id: Annotated[int, Field(description="BigFix action ID.")],
+) -> dict:
+    """Get an action's definition from /api/action/{id}."""
+    conn = connection.get_connection()
+    result = check_rest_result(actions.get_action(conn, action_id), "get_action")
+    return response.bound_mapping(besxml.xml_to_dict(result.text))
+
+
+@mcp.tool
+@bes_errors("get_action_status")
+def get_action_status(
+    action_id: Annotated[int, Field(description="BigFix action ID.")],
+) -> dict:
+    """Get an action's per-computer execution state (/api/action/{id}/status).
+
+    The "did my change actually work" tool. Status is scoped to the computers
+    the configured operator can see.
+    """
+    conn = connection.get_connection()
+    result = check_rest_result(actions.get_action_status(conn, action_id), "get_action_status")
+    return response.bound_mapping(
+        besxml.xml_to_dict(result.text),
+        hint="For a large fleet, query action results with session relevance.",
+    )
+
+
+@mcp.tool
+@bes_errors("list_actions")
+def list_actions() -> dict:
+    """List actions visible to the configured operator (/api/actions)."""
+    conn = connection.get_connection()
+    result = check_rest_result(actions.list_actions(conn), "list_actions")
+    return response.bound_mapping(
+        besxml.xml_to_dict(result.text),
+        hint=(
+            "Use session_relevance_query, e.g. "
+            "'(name of it, id of it) of bes actions', for a narrower view."
+        ),
+    )
+
+
+@mcp.tool
+@bes_errors("find_content")
+def find_content(
+    kind: Annotated[
+        str,
+        Field(description="One of: fixlet, task, analysis, baseline."),
+    ],
+    name_contains: Annotated[
+        str, Field(description="Case-insensitive substring of the content name.")
+    ],
+    limit: Annotated[int | None, LIMIT_FIELD] = None,
+    offset: Annotated[int, OFFSET_FIELD] = 0,
+) -> dict:
+    """Search content by name across every site the operator can see.
+
+    Returns rows of {name, id, site_name, site_path} - site_path is what
+    get_content needs. It is null when the site name is ambiguous (two sites
+    of different types sharing a display name), with the options listed under
+    site_path_candidates rather than guessed at.
+
+    The search term cannot contain a double quote.
+    """
+    conn = connection.get_connection()
+    relevance = content.build_content_search_relevance(kind, name_contains)
+    envelope = check_relevance_envelope(conn.session_relevance_json(relevance))
+    bounded = _bound_rows(envelope, "result", limit, offset)
+    # resolve site paths only for the rows actually being returned
+    bounded["result"] = content.annotate_content_rows(
+        bounded["result"], content.build_site_path_map(conn)
+    )
+    return bounded
+
+
+@mcp.tool
+@bes_errors("get_content")
+def get_content(
+    kind: Annotated[str, Field(description="One of: fixlet, task, analysis, baseline.")],
+    site_path: Annotated[
+        str,
+        Field(
+            description=(
+                "Site path containing the content, e.g. 'master', "
+                "'custom/MySite', 'operator/SomeOperator'."
+            )
+        ),
+    ],
+    content_id: Annotated[int, Field(description="Content ID within the site.")],
+) -> dict:
+    """Get one fixlet, task, analysis or baseline by site path and ID."""
+    conn = connection.get_connection()
+    result = check_rest_result(
+        content.get_content(conn, kind, site_path, content_id), "get_content"
+    )
+    return response.bound_mapping(besxml.xml_to_dict(result.text))
+
+
+@mcp.tool
+@bes_errors("list_operators")
+def list_operators() -> dict:
+    """List console operators visible to the configured operator."""
+    conn = connection.get_connection()
+    result = check_rest_result(content.list_operators(conn), "list_operators")
+    return response.bound_mapping(besxml.xml_to_dict(result.text))
+
+
+@mcp.tool
+@bes_errors("list_roles")
+def list_roles() -> dict:
+    """List BigFix roles visible to the configured operator."""
+    conn = connection.get_connection()
+    result = check_rest_result(content.list_roles(conn), "list_roles")
+    return response.bound_mapping(besxml.xml_to_dict(result.text))
+
+
+@mcp.tool
+@bes_errors("validate_bes_xml")
+def validate_bes_xml(
+    bes_xml: Annotated[str, Field(description="BES XML document to check.")],
+) -> dict:
+    """Validate BES XML against the BigFix schemas.
+
+    Makes no server call.
+
+    Use before asking anyone to import content: it catches malformed or
+    non-conforming XML locally instead of as a REST error.
+    """
+    return content.validate_bes_xml(bes_xml)
 
 
 @mcp.tool
@@ -318,7 +617,7 @@ def get_operator(
             f"Operator '{user_name}' not found - it may not exist, or may not "
             "be visible to the configured operator."
         )
-    return user.besdict
+    return besxml.xml_to_dict(user.text)
 
 
 @mcp.tool
@@ -339,6 +638,9 @@ def get_dashboard_variable(
 def whoami() -> dict:
     """Show the configured connection: user, root server, main operator status.
 
+    writes_enabled says whether the gated write tools are registered in this
+    process; when false they are absent from the tool list entirely.
+
     Cheap connectivity and permission smoke test. is_main_operator tells you
     whether results from the other tools can be treated as the full state of
     BigFix (master operator) or only as this operator's scoped view, which
@@ -349,6 +651,7 @@ def whoami() -> dict:
         "username": conn.username,
         "rootserver": conn.rootserver,
         "is_main_operator": conn.am_i_main_operator(),
+        "writes_enabled": WRITES_ENABLED,
         "besapi_version": besapi.besapi.__version__,
         "bigfix_root_mcp_version": __version__,
     }
@@ -366,30 +669,181 @@ def api_get(
             )
         ),
     ],
+    max_chars: Annotated[
+        int | None,
+        Field(
+            description=(
+                f"Max characters of response text (default " f"{response.MAX_RESPONSE_CHARS})."
+            )
+        ),
+    ] = None,
 ) -> dict:
     """Read-only escape hatch: GET any BigFix REST API path under /api/.
 
     GET is non-mutating across the BigFix REST API. Use path 'help' to
-    discover available endpoints. Response text is truncated to 50KB.
+    discover available endpoints. Response text is capped at max_chars;
+    total_chars reports the full length.
     """
     path = path.strip().lstrip("/")
-    if path.startswith("api/"):
-        path = path[len("api/") :]
+    path = path.removeprefix("api/")
     if "://" in path or path.startswith("..") or not path:
         raise ToolError(
-            "path must be a relative BigFix REST API path such as 'help' or "
-            "'computers'."
+            "path must be a relative BigFix REST API path such as 'help' or " "'computers'."
         )
     conn = connection.get_connection()
     result = check_rest_result(conn.get(path), "api_get")
-    text = result.text
-    truncated = len(text) > API_GET_MAX_TEXT
+    bounded = response.bound_text(result.text, max_chars=max_chars)
     return {
         "status_code": result.request.status_code,
         "content_type": result.request.headers.get("content-type", ""),
-        "truncated": truncated,
-        "text": text[:API_GET_MAX_TEXT],
+        **bounded,
     }
+
+
+# --------------------------------------------------------------------------
+# Gated write surface. Registered only when BIGFIX_ALLOW_WRITES is set, so
+# with the gate off these tools do not exist as far as any client can tell.
+# --------------------------------------------------------------------------
+
+DRY_RUN_FIELD = Field(
+    default=True,
+    description=(
+        "When true (the default) nothing is sent: the response describes the "
+        "call that would be made. Pass false to actually perform the write."
+    ),
+)
+
+
+def _audit(tool: str, target: str, dry_run: bool, outcome: str) -> None:
+    """One structured stderr line per write attempt."""
+    conn = connection.get_connection()
+    logger.info(
+        "BIGFIX WRITE tool=%s operator=%s rootserver=%s target=%s " "dry_run=%s outcome=%s",
+        tool,
+        conn.username,
+        conn.rootserver,
+        target,
+        dry_run,
+        outcome,
+    )
+
+
+if WRITES_ENABLED:
+
+    @mcp.tool
+    @bes_errors("stop_action")
+    def stop_action(
+        action_id: Annotated[int, Field(description="BigFix action ID to stop.")],
+        dry_run: Annotated[bool, DRY_RUN_FIELD] = True,
+    ) -> dict:
+        """Stop an in-flight BigFix action (POST /api/action/{id}/stop).
+
+        Stopping prevents further execution; it does not undo what already
+        ran on endpoints that have already reported. Check get_action_status
+        first to see how far it got.
+        """
+        conn = connection.get_connection()
+        path = writes.stop_action_path(action_id)
+        if dry_run:
+            _audit("stop_action", path, True, "not_sent")
+            return {
+                "dry_run": True,
+                "would_call": f"POST {path}",
+                "note": "Pass dry_run=false to actually stop this action.",
+            }
+        result = writes.stop_action(conn, action_id)
+        _audit("stop_action", path, False, str(result.request.status_code))
+        return {
+            "dry_run": False,
+            "action_id": int(action_id),
+            "status_code": result.request.status_code,
+            **response.bound_text(result.text),
+        }
+
+    @mcp.tool
+    @bes_errors("set_dashboard_variable")
+    def set_dashboard_variable(
+        dashboard_name: Annotated[str, Field(description="Dashboard name.")],
+        var_name: Annotated[str, Field(description="Dashboard variable name.")],
+        var_value: Annotated[str, Field(description="Value to store.")],
+        private: Annotated[bool, Field(description="Store as a private variable.")] = False,
+        dry_run: Annotated[bool, DRY_RUN_FIELD] = True,
+    ) -> dict:
+        """Set a BigFix dashboard datastore variable.
+
+        Touches the datastore only - nothing on any managed endpoint changes.
+        Read the current value with get_dashboard_variable first if you intend
+        to preserve it; this overwrites.
+        """
+        conn = connection.get_connection()
+        path = writes.dashboard_variable_path(dashboard_name, var_name)
+        payload = writes.build_dashboard_variable_xml(dashboard_name, var_name, var_value, private)
+        if dry_run:
+            _audit("set_dashboard_variable", path, True, "not_sent")
+            return {
+                "dry_run": True,
+                "would_call": f"POST {path}",
+                "payload": payload,
+                "note": "Pass dry_run=false to actually write this value.",
+            }
+        result = writes.set_dashboard_variable(conn, dashboard_name, var_name, var_value, private)
+        _audit("set_dashboard_variable", path, False, str(result.request.status_code))
+        return {
+            "dry_run": False,
+            "dashboard": dashboard_name,
+            "name": var_name,
+            "status_code": result.request.status_code,
+        }
+
+    @mcp.tool
+    @bes_errors("import_bes_content")
+    def import_bes_content(
+        site_path: Annotated[
+            str,
+            Field(
+                description=(
+                    "Target site path, e.g. 'custom/MySite'. Import targets a "
+                    "custom site you own."
+                )
+            ),
+        ],
+        bes_xml: Annotated[str, Field(description="BES XML document to import.")],
+        dry_run: Annotated[bool, DRY_RUN_FIELD] = True,
+    ) -> dict:
+        """Create or update custom content in a site (POST /api/import/{site}).
+
+        Importing content does NOT run it: a fixlet or task created this way
+        does nothing until someone deploys an action against it in the
+        console. That is deliberate - this server has no action-deployment
+        tool.
+
+        The XML is validated against the BigFix schemas first, in dry-run too,
+        so malformed content fails locally rather than as a REST error.
+        """
+        conn = connection.get_connection()
+        path = writes.import_path(site_path)
+        verdict = content.validate_bes_xml(bes_xml)
+        if not verdict["valid"]:
+            _audit("import_bes_content", path, dry_run, "invalid_xml")
+            raise ToolError(
+                f"import_bes_content: bes_xml is not valid BES content: " f"{verdict['reason']}"
+            )
+        if dry_run:
+            _audit("import_bes_content", path, True, "not_sent")
+            return {
+                "dry_run": True,
+                "would_call": f"POST {path}",
+                "xml_valid": True,
+                "note": "Pass dry_run=false to actually import this content.",
+            }
+        result = writes.import_bes_content(conn, site_path, bes_xml)
+        _audit("import_bes_content", path, False, str(result.request.status_code))
+        return {
+            "dry_run": False,
+            "site_path": site_path,
+            "status_code": result.request.status_code,
+            **response.bound_text(result.text),
+        }
 
 
 def main() -> None:

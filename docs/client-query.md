@@ -7,7 +7,7 @@ besapi has no built-in support for this flow, so it is documented here.
 Everything below was captured from a live BigFix 11 root server, not inferred
 from documentation.
 
-## 1. Submit — `POST /api/clientquery`
+## 1. Submit - `POST /api/clientquery`
 
 Request body:
 
@@ -22,7 +22,7 @@ Request body:
 ```
 
 `QueryText` is **client** relevance (evaluated on each agent), not session
-relevance. It must be XML-escaped — a query containing `<`, `>` or `&` will
+relevance. It must be XML-escaped - a query containing `<`, `>` or `&` will
 otherwise produce malformed XML. This implementation uses
 `xml.sax.saxutils.escape` rather than a CDATA wrapper, which avoids the
 `]]>`-inside-relevance edge case entirely.
@@ -31,10 +31,23 @@ otherwise produce malformed XML. This implementation uses
 
 | Form | XML |
 | --- | --- |
-| All computers in scope | `<AllComputers>true</AllComputers>` |
+| All computers in scope | `<CustomRelevance>TRUE</CustomRelevance>` |
 | By ID | `<ComputerID>123</ComputerID>` (repeatable) |
 | By name | `<ComputerName>HOST</ComputerName>` (repeatable, must be escaped) |
 | By client relevance | `<CustomRelevance>...</CustomRelevance>` |
+
+> **`<AllComputers>` does not work.** It is what besapi's `get_target_xml`
+> emits and what this document previously described, but a BigFix 11 root
+> server rejects it:
+>
+> ```
+> 400 XML parsing error: no declaration found for element 'AllComputers'
+> ```
+>
+> The other three forms were all accepted in the same test run, so the payload
+> around it is fine - the element itself is not in the server's schema.
+> Targeting all computers is expressed as client relevance `TRUE`, which is
+> applicable on every agent.
 
 Response:
 
@@ -49,12 +62,12 @@ Response:
 
 The query ID is at `ClientQuery/ID`. Via besapi that is
 `result.besobj.ClientQuery.ID`, which is an **lxml objectified element, not an
-int** — coerce with `int()` before interpolating it into a URL path.
+int** - coerce with `int()` before interpolating it into a URL path.
 
 Note the `Resource` attribute came back as `http://` even though the request
 was made over HTTPS; don't feed that attribute back in as a URL.
 
-## 2. Fetch results — `GET /api/clientqueryresults/{id}?output=json`
+## 2. Fetch results - `GET /api/clientqueryresults/{id}?output=json`
 
 Real response (single targeted computer, one result row):
 
@@ -79,7 +92,7 @@ Field notes:
 | --- | --- |
 | `computerID` | BigFix computer ID. One computer can produce **multiple rows**, so count distinct IDs to get "how many agents answered". |
 | `subQueryID` | Index of the sub-query when the query text yields a tuple/plural result. |
-| `isFailure` | Per-agent evaluation failure flag — an agent that answered with an error still counts as *reported*. |
+| `isFailure` | Per-agent evaluation failure flag - an agent that answered with an error still counts as *reported*. |
 | `result` | The answer as a string. |
 | `ResponseTime` | Agent-reported evaluation time in ms. |
 
@@ -89,7 +102,7 @@ Critical semantics:
   no status, and **no completion flag**.
 - Results are **cumulative**: each GET returns everything received so far.
   Re-fetching is cheap and idempotent.
-- The envelope key is `results` (**plural**) — session relevance
+- The envelope key is `results` (**plural**) - session relevance
   (`/api/query`) uses `result` (singular). Easy to conflate.
 - An empty `results` array early on is normal, not an error.
 
@@ -98,26 +111,26 @@ Critical semantics:
 Because nothing in the protocol says "done", polling needs heuristics. This
 server stops on the first of:
 
-1. **`expected_count_reached`** — distinct reporting computers ≥ the number
+1. **`expected_count_reached`** - distinct reporting computers >= the number
    targeted. Only knowable when targeting by ID or name; `AllComputers` and
    `CustomRelevance` targeting yield no expected count (caller may supply one).
-2. **`results_stable`** — the distinct-computer count has not changed for
+2. **`results_stable`** - the distinct-computer count has not changed for
    `stable_polls` consecutive polls, *and* at least one computer has reported.
    The "at least one" guard matters: without it, a query submitted a moment ago
    with zero results would immediately look "stable" and return empty.
-3. **`timeout`** — wall-clock bound. **Partial results at timeout are the
+3. **`timeout`** - wall-clock bound. **Partial results at timeout are the
    normal outcome**, not an error: offline or unreachable agents simply never
    report, so a wait for 100% is a wait forever.
 
 Tradeoffs worth knowing:
 
 - `results_stable` can fire early on a slow/staggered fleet where agents
-  trickle in with gaps longer than `stable_polls × poll_interval`. Raise
+  trickle in with gaps longer than `stable_polls * poll_interval`. Raise
   `stable_polls` when targeting many computers.
 - Only the *count* is compared between polls, not row content. An agent
   returning additional rows for an already-counted computer does not reset the
-  stability counter. Counting distinct computers is deliberate — it is the
-  useful notion of progress — but it means "more data still arriving" is not by
+  stability counter. Counting distinct computers is deliberate - it is the
+  useful notion of progress - but it means "more data still arriving" is not by
   itself a reason to keep waiting.
 - The loop never sleeps past its deadline: the final sleep is clamped to the
   remaining time.
@@ -129,7 +142,7 @@ For waits longer than a minute or two, prefer the split tools
 ## Observed timing
 
 On a small lab fleet, agents that were actively reporting answered a trivial
-query (`computer name`) within roughly 5–15 seconds; `ResponseTime` came back
+query (`computer name`) within roughly 5-15 seconds; `ResponseTime` came back
 as 1000 ms. A 3-computer query returned 2 answers and stopped on
-`results_stable` after ~16 seconds, the third agent never answering — a
+`results_stable` after ~16 seconds, the third agent never answering - a
 textbook example of why partial results must be treated as success.

@@ -1,0 +1,140 @@
+---
+# run on only items staged in git:  pre-commit
+# automatically run on commit:      pre-commit install
+# check all files in repo:          pre-commit run --all-files
+# check all files in repo:          pre-commit run --all-files --hook-stage manual
+# update all pre-commit hooks:      pre-commit autoupdate
+# https://github.com/pre-commit/pre-commit-hooks
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+      - id: check-ast
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: detect-private-key
+      # Block direct commits to the integration branches; work on a feature
+      # branch and open a PR instead. Bypass for a deliberate exception with
+      # `git commit --no-verify`.
+      # - id: no-commit-to-branch
+      #   args: ["--branch=main", "--branch=master"]
+
+  - repo: https://github.com/jgstew/pre-commit-jgstew
+    rev: v2.3.0
+    hooks:
+      - id: fix-files-to-ascii
+      - id: verify-files-are-ascii
+        stages: [manual]
+
+  - repo: https://github.com/adrienverge/yamllint.git
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        args: [-c=.yamllint.yaml]
+
+  - repo: https://github.com/psf/black
+    rev: 26.5.1
+    hooks:
+      - id: black
+        args: ["--target-version=py312", "--line-length=100"]
+
+  # - repo: https://github.com/python-jsonschema/check-jsonschema
+  #   rev: 0.37.4
+  #   hooks:
+  #     - id: check-github-workflows
+  #       args: ["--verbose"]
+  #       stages: [manual]
+  #     - id: check-dependabot
+  #       stages: [manual]
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.3.0
+    hooks:
+      - id: flake8
+
+  - repo: https://github.com/DanielNoord/pydocstringformatter
+    rev: v1.0.0
+    hooks:
+      - id: pydocstringformatter
+        args: ["--max-summary-lines=2", "--linewrap-full-docstring"]
+
+  # - repo: https://github.com/crate-ci/typos
+  #   # v1.48.0
+  #   rev: v1.48.0
+  #   hooks:
+  #     - id: typos
+  #       exclude: ^src/bigfix_saas_mcp/jwt_util.py
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.3
+    hooks:
+      - id: codespell
+        args: ["--ignore-words-list=nce"]
+
+  - repo: https://github.com/abravalheri/validate-pyproject
+    rev: v0.25
+    hooks:
+      - id: validate-pyproject
+        stages: [manual]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.1
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+
+  - repo: https://github.com/woodruffw/zizmor-pre-commit
+    # Find security issues in GitHub Actions CI/CD setups.
+    rev: v1.29.0
+    hooks:
+      # Run the linter.
+      - id: zizmor
+        stages: [manual]
+        # --no-progress is the hook's own default arg and has to be repeated:
+        # setting `args` replaces the list, it does not append to it.
+        # --fix=all applies both safe and unsafe fixes; unsafe ones can change
+        # build behavior (e.g. adding lookup-only to an actions/cache step), so
+        # review the diff this hook produces. Use plain --fix for safe only.
+        # Online mode has no flag: zizmor runs offline unless it finds a token
+        # in GH_TOKEN / GITHUB_TOKEN / ZIZMOR_GITHUB_TOKEN, so export one
+        # (`export GH_TOKEN="$(gh auth token)"`) before running this hook to get
+        # the online-only audits and their fixes.
+        # args: ["--no-progress", "--fix=all"]
+
+  # - repo: https://github.com/astral-sh/uv-pre-commit
+  #   rev: 0.12.2
+  #   hooks:
+  #     - id: uv-lock
+  #     - id: uv-sync
+  #       args: ["--locked"]
+
+  - repo: meta
+    hooks:
+      - id: check-useless-excludes
+        stages: [manual]
+      - id: check-hooks-apply
+        stages: [manual]
+
+  - repo: https://github.com/christophmeissner/pytest-pre-commit
+    rev: 1.0.0
+    hooks:
+      # see config in pyproject.toml
+      - id: pytest
+        pass_filenames: false
+        always_run: true
+        stages: [manual]
+        # Keep the runtime pins in sync with pyproject.toml [project.dependencies]:
+        # unpinned fastmcp resolves to 3.x, which ships mcp 1.x and has no
+        # mcp_types module (imported by bigfix_saas_mcp.tools._confirm).
+        additional_dependencies:
+          - fastmcp==4.0.0b1
+          - besapi
+          - pytest
+          - pytest-cov
+          # - pytest-xdist
+          - pytest-asyncio

@@ -16,9 +16,7 @@ def make_results_envelope(rows):
 
 def queue_results(conn, row_sets):
     for rows in row_sets:
-        conn.get_responses.append(
-            FakeRESTResult(text=json.dumps(make_results_envelope(rows)))
-        )
+        conn.get_responses.append(FakeRESTResult(text=json.dumps(make_results_envelope(rows))))
 
 
 SUBMIT_RESPONSE_XML = (
@@ -29,23 +27,30 @@ SUBMIT_RESPONSE_XML = (
 
 
 class TestBuildTargetXml:
-    def test_all_computers(self):
+    def test_all_computers_uses_custom_relevance_not_allcomputers(self):
+        """A BigFix 11 root server rejects <AllComputers> outright:
+
+            400 XML parsing error: no declaration found for element
+            'AllComputers'
+
+        besapi's get_target_xml emits it and docs describe it as valid, but it
+        does not work. Client relevance TRUE is applicable on every agent and
+        is accepted. Verified live; see docs/rest-endpoints.md.
+        """
         xml_out, count = clientquery.build_target_xml(target_all=True)
-        assert xml_out == "<AllComputers>true</AllComputers>"
+        assert "AllComputers" not in xml_out
+        assert xml_out == "<CustomRelevance>TRUE</CustomRelevance>"
         assert count is None
 
     def test_computer_ids(self):
         xml_out, count = clientquery.build_target_xml(computer_ids=[1, 2, 3])
         assert xml_out == (
-            "<ComputerID>1</ComputerID><ComputerID>2</ComputerID>"
-            "<ComputerID>3</ComputerID>"
+            "<ComputerID>1</ComputerID><ComputerID>2</ComputerID>" "<ComputerID>3</ComputerID>"
         )
         assert count == 3
 
     def test_computer_names_escaped(self):
-        xml_out, count = clientquery.build_target_xml(
-            computer_names=["host<1>", "a&b"]
-        )
+        xml_out, count = clientquery.build_target_xml(computer_names=["host<1>", "a&b"])
         assert "<ComputerName>host&lt;1&gt;</ComputerName>" in xml_out
         assert "<ComputerName>a&amp;b</ComputerName>" in xml_out
         assert count == 2
@@ -120,9 +125,7 @@ class TestSubmitClientQuery:
     def test_prefers_native_besapi_method(self):
         conn = FakeBESConnection()
         conn.client_query_submit = lambda query_text, target_xml: "7"
-        assert (
-            clientquery.submit_client_query(conn, "computer name", "<x/>") == 7
-        )
+        assert clientquery.submit_client_query(conn, "computer name", "<x/>") == 7
         assert conn.calls == []  # local implementation not used
 
 
