@@ -45,3 +45,10 @@ constraint-dependencies = ["fastmcp-slim==4.0.0b1"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Run without the project installed. The pytest pre-commit hook builds an
+# isolated venv from its additional_dependencies and never installs this
+# package, so `import bigfix_root_mcp` has to resolve from the source tree.
+#   "src" -> the package itself
+#   "."   -> `from tests.conftest import ...`, which otherwise only resolves
+#            because `python -m pytest` happens to put the cwd on sys.path
+pythonpath = ["src", "."]

@@ -65,7 +65,7 @@ class TestClientQueryTools:
         assert result.data["reported_count"] == 2
         assert result.data["results"] == rows
 
-    async def test_full_client_query_flow(self, fake_conn):
+    async def test_full_client_query_flow(self, fake_conn, monkeypatch):
         fake_conn.post_responses.append(FakeRESTResult(text=SUBMIT_RESPONSE_XML))
         fake_conn.get_responses.extend(
             [
@@ -84,18 +84,65 @@ class TestClientQueryTools:
                 ),
             ]
         )
+        # the tool clamps the poll interval up to MIN_POLL_INTERVAL_SECONDS, so
+        # without lowering the floor this test spends 2 real seconds asleep -
+        # on its own it was 2.0s of a 3.5s suite. The clamp itself is covered
+        # by test_poll_interval_is_clamped_up below.
+        monkeypatch.setattr(server, "MIN_POLL_INTERVAL_SECONDS", 0)
         result = await call(
             "client_query",
             {
                 "query_text": "computer name",
                 "target_computer_ids": [10, 20],
                 "timeout_seconds": 30,
-                "poll_interval_seconds": 2,
+                "poll_interval_seconds": 0,
             },
         )
         assert result.data["stop_reason"] == "expected_count_reached"
         assert result.data["reported_count"] == 2
         assert result.data["query_id"] == 42
+
+    async def test_poll_interval_is_clamped_up(self, fake_conn, monkeypatch):
+        """A caller asking for a tight poll loop must not get one.
+
+        MIN_POLL_INTERVAL_SECONDS exists to protect the root server from
+        abusive polling and had no test. The real floor is 2s, which is too
+        slow to assert against directly, so the floor is lowered to something
+        measurable and the clamp is checked against that.
+
+        The query completes on the second poll rather than running to timeout,
+        so exactly one clamped sleep happens - timeout_seconds has its own
+        floor of 1s, which would otherwise set the cost of this test.
+        """
+        monkeypatch.setattr(server, "MIN_POLL_INTERVAL_SECONDS", 0.25)
+        fake_conn.post_responses.append(FakeRESTResult(text=SUBMIT_RESPONSE_XML))
+        fake_conn.get_responses.extend(
+            [
+                FakeRESTResult(text=json.dumps(make_results_envelope([]))),
+                FakeRESTResult(
+                    text=json.dumps(
+                        make_results_envelope(
+                            [
+                                {"computerID": 10, "result": "a"},
+                                {"computerID": 20, "result": "b"},
+                            ]
+                        )
+                    )
+                ),
+            ]
+        )
+        result = await call(
+            "client_query",
+            {
+                "query_text": "computer name",
+                "target_computer_ids": [10, 20],
+                # asking for no delay at all: must be raised to the floor
+                "poll_interval_seconds": 0,
+            },
+        )
+        assert result.data["stop_reason"] == "expected_count_reached"
+        # the sleep between the two polls was clamped up from the 0 requested
+        assert result.data["elapsed_seconds"] >= 0.25
 
 
 class TestOtherTools:

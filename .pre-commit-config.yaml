@@ -127,7 +127,7 @@ repos:
       - id: pytest
         pass_filenames: false
         always_run: true
-        stages: [manual]
+        # stages: [manual]
         # Keep the runtime pins in sync with pyproject.toml [project.dependencies]:
         # unpinned fastmcp resolves to 3.x, which ships mcp 1.x and has no
         # mcp_types module (imported by bigfix_saas_mcp.tools._confirm).
