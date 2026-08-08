@@ -87,7 +87,7 @@ def test_ssl_verify_parsing(raw, expected):
 
 
 def test_no_stdout_output(monkeypatch, tmp_path, capsys):
-    """stdout belongs to the MCP stdio transport; config loading must be silent."""
+    """Stdout belongs to the MCP stdio transport; config loading must be silent."""
     conf = write_conf(
         tmp_path / "besapi.conf",
         "[besapi]\nBES_ROOT_SERVER = https://file.example.com:52311\n"

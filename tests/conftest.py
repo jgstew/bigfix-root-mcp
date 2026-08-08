@@ -29,9 +29,7 @@ class FakeRESTResult:
 
     def __init__(self, text="", status_code=200, headers=None, url=""):
         self.text = text
-        self.request = FakeResponse(
-            status_code=status_code, text=text, headers=headers, url=url
-        )
+        self.request = FakeResponse(status_code=status_code, text=text, headers=headers, url=url)
 
     @property
     def besobj(self):

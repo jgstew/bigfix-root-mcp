@@ -11,7 +11,7 @@ back into a bug.
 Only two paths raise:
 
 - **HTTP 403** raises `PermissionError`, and it happens inside
-  `RESTResult.__init__` (`besapi.py:1358`) — so it propagates out of
+  `RESTResult.__init__` (`besapi.py:1358`) - so it propagates out of
   `conn.get()`/`post()` rather than being returned.
 - **`login()`** calls `raise_for_status()` (`besapi.py:798`).
 
@@ -28,10 +28,10 @@ success.**
 | `__bool__` calls `login()` | `besapi.py:613` | A casual `if conn:` can issue an HTTP request. Avoid truthiness checks on connections. |
 | `__del__` calls `logout()` and clears auth | `besapi.py:608` | The connection must be kept referenced for the process lifetime; a garbage-collected connection closes its session. This is why `connection.py` caches a module-level singleton. |
 | `logout()` clears cookies and closes the session but does **not** reset `last_connected` | `besapi.py:812` | After `logout()`, `login()` still short-circuits and `bool(conn)` still returns `True` against a dead session. To genuinely reconnect, construct a new `BESConnection` (`connection.reset_connection()`). |
-| `__init__` performs the login round-trip | — | Constructing the object is a network call that can raise `requests.HTTPError`. Construction is therefore deferred to the first tool call, not done at server startup. |
+| `__init__` performs the login round-trip | - | Constructing the object is a network call that can raise `requests.HTTPError`. Construction is therefore deferred to the first tool call, not done at server startup. |
 
 Auth is HTTP Basic re-sent on every request, so there is no session expiry to
-manage — the absence of refresh logic is fine, not an oversight.
+manage - the absence of refresh logic is fine, not an oversight.
 
 ## Method return shapes are inconsistent
 
@@ -50,7 +50,7 @@ would break at runtime:
 
 ## Session relevance: prefer the JSON variants
 
-- `session_relevance_json` → `{"result": [...], "plural": bool, "type": str,
+- `session_relevance_json` -> `{"result": [...], "plural": bool, "type": str,
   "evaltime_ms": int}`. This is the one to use.
 - `session_relevance_array` / `session_relevance_string` report **errors
   in-band as list elements**: a relevance error becomes the string
@@ -63,7 +63,7 @@ would break at runtime:
 
 Relevance **errors are returned by the server with HTTP 200** and an `error`
 key in the JSON envelope, which is why `errors.check_relevance_envelope()`
-exists — status-code checking alone will not catch a bad query.
+exists - status-code checking alone will not catch a bad query.
 
 `session_relevance_json` percent-encodes the relevance with
 `urllib.parse.quote()` and then passes it as a form-dict value, which
@@ -71,7 +71,7 @@ percent-encodes again. This looked like a double-encoding bug; **it was tested
 against a live server and round-trips correctly**, including relevance
 containing spaces, `+`, and `%25`. Leave it alone. (Note that a literal `%` in
 a relevance *string constant* must be written `%25` in relevance syntax itself
-— an unescaped `%` produces the server-side error "A string constant had an
+- an unescaped `%` produces the server-side error "A string constant had an
 improper %-sequence", which is a relevance authoring error, not an encoding
 bug.)
 
@@ -81,7 +81,7 @@ bug.)
   On an MCP stdio transport, stray stdout corrupts the JSON-RPC stream. This is
   the reason `connection.py` re-implements config reading instead of calling
   it. It also hardcodes `verify=False` with no override.
-- `get_bes_conn_interactive()` prompts via `input()`/`getpass()` — blocks
+- `get_bes_conn_interactive()` prompts via `input()`/`getpass()` - blocks
   forever with no TTY.
 - `plugin_utilities.get_besapi_connection(args)` falls back to
   `getpass.getpass()`, and on Windows reads credentials from the registry
@@ -96,7 +96,7 @@ stderr. There is a test enforcing it
 
 `set_current_site_path()` / `get_current_site_path()` maintain a mutable
 "current site" on the connection, defaulting to `master`. Several methods take
-an optional `site_path` and silently fall back to it — notably
+an optional `site_path` and silently fall back to it - notably
 `get_computergroup`, `import_bes_to_site`, and `export_site_contents`.
 
 This is a bescli REPL convenience and is wrong for an MCP server, where tool
