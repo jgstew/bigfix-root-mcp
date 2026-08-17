@@ -10,6 +10,8 @@ read-only helpers.
 
 Strongly recommend using the official BigFix Platform MCP server instead: https://help.hcl-software.com/bigfix/11.0/platform/Platform/MCP/c_introduction.html
 
+The capabilities of this MCP server are intentionally limited, where as the official one is not.
+
 ## Tools
 
 | Tool | Purpose |
