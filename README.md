@@ -8,6 +8,8 @@ Focus: **session relevance** queries (data the server already has) and
 **client fast query** (live questions answered by BigFix agents), plus a few
 read-only helpers.
 
+Strongly recommend using the official BigFix Platform MCP server instead: https://help.hcl-software.com/bigfix/11.0/platform/Platform/MCP/c_introduction.html
+
 ## Tools
 
 | Tool | Purpose |
