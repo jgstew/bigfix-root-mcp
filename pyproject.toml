@@ -67,8 +67,17 @@ required-version = ">=0.12"
 # `cooldown` on the uv/github-actions ecosystems in .github/dependabot.yml.
 exclude-newer = "7 days"
 # fastmcp 4.0.0b1 is a meta-package over fastmcp-slim; uv only allows
-# prereleases for explicitly named packages, so constrain the transitive dep:
-constraint-dependencies = ["fastmcp-slim==4.0.0b1"]
+# prereleases for explicitly named packages, so the transitive dep has to be
+# named here to be resolvable at all.
+#
+# Deliberately `>=` and not `==`: the point of this entry is to *name*
+# fastmcp-slim, not to pin it. fastmcp pins its own matching
+# fastmcp-slim[client]==<same version>, so the exact version is already
+# decided by the `fastmcp==` pin in [project.dependencies] above. Pinning it
+# again here made the two impossible to bump together -- Dependabot's
+# fastmcp 4.0.0b1 -> 4.0.0b3 PR failed with dependency_file_not_resolvable,
+# because b3 requires fastmcp-slim==4.0.0b3 while this line still said b1.
+constraint-dependencies = ["fastmcp-slim>=4.0.0b1"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
