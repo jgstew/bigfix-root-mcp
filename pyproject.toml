@@ -36,6 +36,12 @@ dependencies = [
     "requests",
 ]
 
+# qna: fast client-relevance evaluation on containers/inventoried hosts via
+# the qna binary. Heavy deps (docker, asyncssh), so opt-in; the qna tools
+# register only when this is installed - see qna.py and the README.
+[project.optional-dependencies]
+qna = ["bigfix-remote-client-relevance>=1.1.2,<2"]
+
 [project.urls]
 Homepage = "https://github.com/jgstew/bigfix-root-mcp"
 Repository = "https://github.com/jgstew/bigfix-root-mcp"
@@ -69,7 +75,7 @@ exclude-newer = "7 days"
 # First-party packages (same author as this project) are exempt from the
 # cooldown: it guards against compromised *third-party* releases, and these
 # iterate faster than 7 days.
-exclude-newer-package = { bigfix-relevance-analyzer = "1 hour" }
+exclude-newer-package = { bigfix-relevance-analyzer = "1 hour", bigfix-remote-client-relevance = "1 hour" }
 # fastmcp 4.0.0b1 is a meta-package over fastmcp-slim; uv only allows
 # prereleases for explicitly named packages, so the transitive dep has to be
 # named here to be resolvable at all.
@@ -101,6 +107,12 @@ files = ["src"]
 # so a genuinely missing import elsewhere still gets reported.
 [[tool.mypy.overrides]]
 module = ["besapi.*"]
+ignore_missing_imports = true
+
+# optional [qna] extra: not installed in the dev environment on purpose (tests
+# fake it at the sys.modules seam), so mypy cannot follow the import
+[[tool.mypy.overrides]]
+module = ["bigfix_remote_client_relevance.*"]
 ignore_missing_imports = true
 
 [tool.ruff]

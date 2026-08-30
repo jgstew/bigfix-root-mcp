@@ -69,8 +69,10 @@ jobs:
       - name: install uv
         run: python -m pip install "uv==${UV_VERSION}"
 
-      # no --all-extras: this package declares no optional extras, and the dev
-      # tooling lives in [dependency-groups] dev, which uv syncs by default
+      # no --all-extras: the [qna] extra is deliberately not installed in CI
+      # (tests fake bigfix_remote_client_relevance at the sys.modules seam,
+      # so docker/asyncssh never enter the test environment); the dev tooling
+      # lives in [dependency-groups] dev, which uv syncs by default
       - name: uv sync --locked
         run: uv sync --locked
 

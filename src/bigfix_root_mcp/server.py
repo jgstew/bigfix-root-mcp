@@ -31,6 +31,7 @@ from bigfix_root_mcp import (
     connection,
     content,
     prompts,
+    qna,
     response,
     writes,
 )
@@ -48,6 +49,11 @@ MIN_POLL_INTERVAL_SECONDS = 2
 
 # read once at import: the write tools below are registered only if this is on
 WRITES_ENABLED = connection.writes_enabled()
+
+# read once at import, like writes: the qna tools exist only when the optional
+# bigfix-remote-client-relevance extra is installed and a target source is
+# allowed (see qna.qna_enabled)
+QNA_ENABLED = qna.qna_enabled()
 
 LIMIT_FIELD = Field(
     default=None,
@@ -816,6 +822,7 @@ def whoami() -> dict:
         "rootserver": conn.rootserver,
         "is_main_operator": conn.am_i_main_operator(),
         "writes_enabled": WRITES_ENABLED,
+        "qna_enabled": QNA_ENABLED,
         "besapi_version": besapi.besapi.__version__,
         "bigfix_root_mcp_version": __version__,
     }
@@ -890,6 +897,114 @@ def _audit(tool: str, target: str, dry_run: bool, outcome: str) -> None:
         dry_run,
         outcome,
     )
+
+
+# --------------------------------------------------------------------------
+# qna fast evaluation (optional). Registration is the gate, as with writes:
+# with the extra uninstalled or every target source disabled, these tools do
+# not exist as far as any client can tell.
+# --------------------------------------------------------------------------
+
+if QNA_ENABLED:
+
+    @mcp.tool
+    @bes_errors("list_qna_targets")
+    def list_qna_targets() -> dict:
+        """List targets available to evaluate_client_relevance_qna.
+
+        Inventory entries are admin-configured on the server
+        (BIGFIX_QNA_INVENTORY); containers_allowed says whether arbitrary
+        container image names may be passed as targets.
+        """
+        return {
+            "inventory": qna.list_inventory_targets(),
+            "containers_allowed": qna.containers_enabled(),
+        }
+
+    @mcp.tool
+    @bes_errors("evaluate_client_relevance_qna")
+    async def evaluate_client_relevance_qna(
+        relevance: Annotated[
+            str,
+            Field(description="Client relevance to evaluate with qna on each target."),
+        ],
+        ctx: Context,
+        inventory_targets: Annotated[
+            list[str] | None,
+            Field(
+                description=(
+                    "Names from the admin-configured qna inventory (see list_qna_targets)."
+                )
+            ),
+        ] = None,
+        container_images: Annotated[
+            list[str] | None,
+            Field(
+                description=(
+                    "Container images to evaluate in, e.g. 'ubuntu:22.04'. The first "
+                    "use of an image is slow (agent artifact download + derived image "
+                    "build); later runs are about a second."
+                )
+            ),
+        ] = None,
+        timeout_seconds: Annotated[
+            float,
+            Field(description=f"Per-target timeout (1-{qna.MAX_QNA_TIMEOUT_SECONDS})."),
+        ] = 30,
+        limit: Annotated[int | None, LIMIT_FIELD] = None,
+        offset: Annotated[int, OFFSET_FIELD] = 0,
+    ) -> dict:
+        """Evaluate CLIENT relevance with the BigFix qna tool - a fast feedback
+        loop that never touches the BigFix deployment.
+
+        qna runs on lab targets (containers or admin-inventoried hosts), NOT on
+        managed BigFix endpoints: results reflect each target machine only.
+        There is no operator scope, no site subscriptions and no client
+        settings, so inspectors that depend on deployment state will differ
+        from what client_query returns. Iterate on relevance syntax and
+        inspector behavior here, then confirm on real agents with client_query.
+
+        Per-target failures come back as result rows with error_kind
+        ('relevance', 'qna', 'bootstrap', 'transport', 'resolve'), never as a
+        tool error. ok_count and target_count describe the whole run; the rows
+        are windowed by limit/offset.
+        """
+        advisory = analysis.preflight(relevance, dialect="client")
+        targets = qna.resolve_targets(inventory_targets, container_images)
+        timeout_seconds = max(1, min(timeout_seconds, qna.MAX_QNA_TIMEOUT_SECONDS))
+        pkg = qna._qna()  # the module's one lazy import seam
+        # audit line, mirroring _audit for writes: qna executes on targets
+        logger.info(
+            "BIGFIX QNA relevance=%r targets=%s",
+            relevance[:200],
+            [target.label for target in targets],
+        )
+        total = pkg.count_work(targets)
+        await ctx.report_progress(
+            progress=0,
+            total=total,
+            message=f"Evaluating on {len(targets)} target(s).",
+        )
+        results = []
+        async for result in pkg.evaluate_client_relevance_stream(
+            relevance,
+            targets,
+            max_parallel=min(qna.MAX_PARALLEL, len(targets)),
+            timeout_s=timeout_seconds,
+        ):
+            results.append(qna.shape_result(result))
+            status = "ok" if results[-1].get("error_kind") is None else results[-1]["error_kind"]
+            await ctx.report_progress(
+                progress=len(results),
+                total=total,
+                message=f"{results[-1].get('host')}: {status}",
+            )
+        payload = {
+            "target_count": len(targets),
+            "ok_count": sum(1 for r in results if r.get("error_kind") is None),
+            "results": results,
+        }
+        return _with_advisory(_bound_rows(payload, "results", limit, offset), advisory)
 
 
 if WRITES_ENABLED:
