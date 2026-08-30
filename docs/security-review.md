@@ -40,8 +40,8 @@ and inherits the client process's trust boundary.
 ### 1. Client fast query is arbitrary read of every managed endpoint - HIGH
 
 `client_query` / `client_query_submit`
-([server.py:99](../src/bigfix_root_mcp/server.py:99),
-[server.py:161](../src/bigfix_root_mcp/server.py:161)) take arbitrary client
+([server.py](../src/bigfix_root_mcp/server.py),
+[server.py](../src/bigfix_root_mcp/server.py)) take arbitrary client
 relevance and `target_all`. Client relevance is side-effect-free, so the
 "read-only" framing holds - but it can read file contents, registry values,
 environment variables, and process lists on every agent, and the BigFix agent
@@ -72,8 +72,8 @@ Lower impact than the fleet sweep, same category.
 ### 2. TLS verification defaults to off, with credentials on every request - HIGH
 
 `BESConfig.verify` defaults to `False` and `_parse_verify("")` returns `False`
-([connection.py:46](../src/bigfix_root_mcp/connection.py:46),
-[connection.py:49](../src/bigfix_root_mcp/connection.py:49)), so an unset
+([connection.py](../src/bigfix_root_mcp/connection.py),
+[connection.py](../src/bigfix_root_mcp/connection.py)), so an unset
 `BES_SSL_VERIFY` means no certificate validation. besapi sets
 `session.auth = (username, password)`, i.e. HTTP Basic - the operator password
 is sent, base64-encoded and otherwise in the clear, on *every* request. With
@@ -93,7 +93,7 @@ precisely because besapi's helper hardcodes `verify=False`.
 
 ### 3. `api_get` path guard does not stop dot-segment escape - MEDIUM
 
-[server.py:375](../src/bigfix_root_mcp/server.py:375) rejects a path only if it
+[server.py](../src/bigfix_root_mcp/server.py) rejects a path only if it
 contains `://`, *starts with* `..`, or is empty. `..` anywhere else passes:
 
     path = "computers/../../rd/x"  ->  https://host:52311/api/computers/../../rd/x
@@ -108,7 +108,7 @@ the same operator.
 
 The same pattern applies to `get_computer_group`, which interpolates
 `site_path` into the path unescaped
-([server.py:291](../src/bigfix_root_mcp/server.py:291)) - a `site_path` of
+([server.py](../src/bigfix_root_mcp/server.py)) - a `site_path` of
 `master/../../x` or one carrying a `?` alters the request shape.
 
 Fix: reject any path whose segments include `.` or `..` (not just a prefix
@@ -130,7 +130,7 @@ bound on how long the call takes.
 
 Compounding this: `poll_client_query` is `async` but calls the synchronous
 `fetch_client_query_results` directly
-([clientquery.py:184](../src/bigfix_root_mcp/clientquery.py:184)), so each poll
+([clientquery.py](../src/bigfix_root_mcp/clientquery.py)), so each poll
 blocks the event loop for the duration of the HTTP request. One stuck query
 stalls the whole server.
 
@@ -153,7 +153,7 @@ problem for the client. Recommend a response-size cap with an explicit
 ### 6. Shared `requests.Session` across concurrent tool calls - LOW/MEDIUM
 
 `connection.get_connection()` returns a module-level singleton
-([connection.py:110](../src/bigfix_root_mcp/connection.py:110)) whose
+([connection.py](../src/bigfix_root_mcp/connection.py)) whose
 `requests.Session` is shared. FastMCP dispatches synchronous tools to a worker
 thread pool, so two concurrent tool calls can use the same `Session` from
 different threads; `requests.Session` is not documented as thread-safe. Failure
@@ -188,7 +188,7 @@ restart.
 ### 8. Error messages return up to 500 bytes of server response - LOW
 
 `_snippet` caps error text at 500 characters
-([errors.py:15](../src/bigfix_root_mcp/errors.py:15)) and `check_rest_result`
+([errors.py](../src/bigfix_root_mcp/errors.py)) and `check_rest_result`
 includes the response body in the `ToolError`. The 403 `PermissionError` raised
 inside besapi's `RESTResult` also embeds the full request URL. This is
 deliberate and useful for debugging; it does mean BigFix error bodies reach the
@@ -198,7 +198,7 @@ it rather than change it.
 ### 9. Broad exception catching in `bes_errors` - LOW (not a security issue)
 
 `_handled` includes `AttributeError` and `KeyError`
-([errors.py:81](../src/bigfix_root_mcp/errors.py:81)), so genuine coding bugs
+([errors.py](../src/bigfix_root_mcp/errors.py)), so genuine coding bugs
 are reported to the model as "unexpected error" rather than surfacing. This
 hides defects, including any that would otherwise reveal a security-relevant
 failure. Consider narrowing, or at least `logger.exception`-ing the original
@@ -210,6 +210,11 @@ before translating.
   `create_*`, `set_dashboard_variable_value`, `export_*`) appears in the
   package; `post` is used only for `/api/clientquery`. Registration really is
   the boundary, as [design-decisions.md](design-decisions.md) claims.
+
+  As reviewed, at `0.0.2`. Three `post`-based write tools have since been added
+  behind `BIGFIX_ALLOW_WRITES`, off by default - see "Newly relevant: the write
+  surface" below. Registration is still the boundary; there is simply more than
+  one thing it can register now.
 - **XML injection.** `build_target_xml` and `build_client_query_xml` escape
   query text, computer names, and targeting relevance with
   `xml.sax.saxutils.escape`, and computer IDs go through `int()`. This is
@@ -225,7 +230,7 @@ before translating.
   deliberately avoids besapi's printing helper, so the stdio transport cannot be
   corrupted into desynchronizing the client.
 - **Polling limits.** `MAX_TIMEOUT_SECONDS` and `MIN_POLL_INTERVAL_SECONDS`
-  ([server.py:35](../src/bigfix_root_mcp/server.py:35)) clamp the caller's
+  ([server.py](../src/bigfix_root_mcp/server.py)) clamp the caller's
   values and prevent a tight polling loop against the root server.
 - **Operator-scope honesty.** Tool descriptions and `whoami.is_main_operator`
   correctly prevent the model from reporting a scoped view as complete. This is

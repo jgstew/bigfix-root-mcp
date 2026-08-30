@@ -144,8 +144,14 @@ exact version and expect sharp edges").
 - **The `[tool.uv]` block is a resolver constraint, not a dependency.** The
   dependency is `fastmcp`; in 4.0 that is a meta-package whose code lives in
   `fastmcp-slim`. uv only permits pre-releases for explicitly named packages,
-  so without `constraint-dependencies = ["fastmcp-slim==4.0.0b1"]` a `uv lock`
+  so without `constraint-dependencies = ["fastmcp-slim>=4.0.0b1"]` a `uv lock`
   can fail on the transitive prerelease. Irrelevant to pip.
+
+  Deliberately `>=` and not `==`: the entry exists to *name* fastmcp-slim, not
+  to pin it, and fastmcp pins its own matching `fastmcp-slim[client]` at the
+  same version anyway. It was `==4.0.0b1` at first, which made the two
+  impossible to bump together - the first Dependabot PR to try (4.0.0b1 ->
+  4.0.0b3) failed with `dependency_file_not_resolvable`.
 - **No `ctx.info()` logging.** The MCP logging capability is deprecated as of
   the `2026-07-28` stateless protocol era (SEP-2577) and emits a deprecation
   warning. `client_query` reports exclusively via `ctx.report_progress`, which
@@ -165,7 +171,7 @@ exact version and expect sharp edges").
 
 ## Testing without BigFix
 
-All 53 tests run offline against a scripted `FakeBESConnection`
+All 191 tests run offline against a scripted `FakeBESConnection`
 (`tests/conftest.py`) that mimics besapi's `url()`, queues responses per verb,
 and records calls. Tool-level tests drive the real server through an in-memory
 `fastmcp.Client`, so tool registration, schema generation, and `ToolError`

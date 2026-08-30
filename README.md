@@ -126,8 +126,22 @@ Example MCP client config (see [.mcp.json](.mcp.json)):
 
 ## Install / run
 
+Not published to PyPI, so `pip install bigfix-root-mcp` will not find it. Install
+from a [release](https://github.com/jgstew/bigfix-root-mcp/releases) - every
+release since v0.1.3 attaches a wheel and an sdist, with a `SHA256SUMS.txt` to
+check them against:
+
 ```bash
-pip install bigfix-root-mcp   # or: uvx bigfix-root-mcp
+pip install https://github.com/jgstew/bigfix-root-mcp/releases/download/v0.1.3/bigfix_root_mcp-0.1.3-py3-none-any.whl
+```
+
+(the asset name carries the version, so bump both halves of that URL for a
+newer release)
+
+Or straight from the repository:
+
+```bash
+uvx --from git+https://github.com/jgstew/bigfix-root-mcp bigfix-root-mcp
 ```
 
 From a checkout ([uv](https://docs.astral.sh/uv/) required, 0.12+):
