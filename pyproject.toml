@@ -96,11 +96,60 @@ target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RUF"]
+# The PL* families are ruff's port of pylint, which is why there is no
+# separate pylint hook: on this codebase they report the same findings, and
+# pylint's one unique finding (W0706 on the `except ToolError: raise` in
+# errors.py) is a false positive -- that clause is load-bearing, it shadows
+# the `except _handled` below it so ToolErrors pass through untranslated.
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific
+    "A",    # flake8-builtins (shadowing)
+    "C4",   # flake8-comprehensions
+    "G",    # flake8-logging-format
+    "ISC",  # implicit str concat
+    "LOG",  # flake8-logging
+    "PIE",  # flake8-pie
+    "RET",  # flake8-return
+    "T20",  # flake8-print (stdout belongs to the MCP stdio transport)
+    "TRY",  # tryceratops
+    "PLC",  # pylint conventions
+    "PLE",  # pylint errors
+    "PLW",  # pylint warnings
+]
+
+ignore = [
+    # Deliberately not enabled, with reasons:
+    #   PLR2004 (magic values) - 41 hits, all of them test assertions where the
+    #           literal is the point of the assertion.
+    #   PLR0913/PLR0917 (too many arguments) - an MCP tool's parameter list is
+    #           its published schema; the count is not a design choice.
+    #   ARG002 (unused arguments) - pytest fixtures requested for their side
+    #           effects rather than their value.
+    # TRY003 is ignored here rather than left out of `select` so the rest of the
+    # TRY family still applies: this server deliberately raises ToolError with
+    # long, self-contained messages, because a ToolError message is the only
+    # part of a failure the MCP client is guaranteed to see.
+    "TRY003",
+]
 
 [tool.ruff.lint.per-file-ignores]
 # SIM300: the subset assertions here (`EXPECTED_RESOURCES <= uris`) are set
 # comparisons, not Yoda conditions -- "expected is a subset of what we got" is
 # the direction that reads correctly, and SIM300's suggested `uris >=
 # EXPECTED_RESOURCES` inverts the emphasis for no gain.
-"tests/*" = ["S101", "SIM300"]
+"tests/*" = [
+    "S101",
+    "SIM300",
+    # Imports deferred into a test body on purpose: these tests reload a module
+    # (or import it for the first time) after setting environment variables, so
+    # import time is what is under test.
+    "PLC0415",
+]

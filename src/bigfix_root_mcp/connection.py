@@ -127,7 +127,9 @@ def get_connection() -> besapi.besapi.BESConnection:
     support is broken upstream (no __exit__), and bool(conn) re-triggers
     login(). Construction raises requests.HTTPError on bad credentials.
     """
-    global _conn
+    # PLW0603 suppressed: this is the lazy singleton documented above, and the
+    # cache has to be module-level for reset_connection() to clear it.
+    global _conn  # noqa: PLW0603
     if _conn is None:
         config = load_config()
         _conn = besapi.besapi.BESConnection(
@@ -141,5 +143,5 @@ def get_connection() -> besapi.besapi.BESConnection:
 
 def reset_connection() -> None:
     """Drop the cached connection (tests; recovery after auth errors)."""
-    global _conn
+    global _conn  # noqa: PLW0603
     _conn = None
