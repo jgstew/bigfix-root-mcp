@@ -17,6 +17,8 @@ The capabilities of this MCP server are intentionally limited, where as the offi
 | Tool | Purpose |
 | --- | --- |
 | `session_relevance_query` | Evaluate session relevance on the root server; returns the JSON envelope (`result`, `evaltime_ms`). |
+| `analyze_relevance` | Statically analyze a relevance expression offline - parse, types, dialect, unknown inspectors with suggestions, complexity. Never evaluates it. |
+| `search_inspectors` | Fuzzy-search the offline inspector reference by name or phrase. |
 | `client_query_submit` | Submit a client fast query, return its `query_id` immediately. |
 | `client_query_results` | Fetch current (cumulative) results for a query ID; safe to call repeatedly. |
 | `client_query` | Submit + poll in one call with progress notifications; stops on expected count reached, results stable, or timeout. |
@@ -36,6 +38,28 @@ The capabilities of this MCP server are intentionally limited, where as the offi
 | `get_content` | One fixlet, task, analysis or baseline by site path and ID. |
 | `list_operators` / `list_roles` | Console operators and roles (master operator only). |
 | `validate_bes_xml` | Validate BES XML against the BigFix schemas. No server call. |
+
+### Relevance analysis (advisory)
+
+The relevance-taking tools statically analyze their relevance with
+[bigfix-relevance-analyzer](https://github.com/jgstew/bigfix-relevance-analyzer)
+before sending it (dialect pinned per tool). The analysis is **advisory
+only**: even a query the analyzer rejects still goes to the server, because
+the analyzer's inspector table is a snapshot - an unknown inspector there may
+still exist on the live server. When there are findings, the response carries
+an `analysis` key (findings, suggestions, dialect mismatch); a clean query
+adds nothing. Server-side relevance errors gain a `Static analysis:` appendix
+with the findings and did-you-mean suggestions, so a typo'd inspector is a
+one-round-trip fix.
+
+### qna fast evaluation (opt-in)
+
+Absent unless the `[qna]` extra is installed - see [qna evaluation](#qna-evaluation).
+
+| Tool | Purpose |
+| --- | --- |
+| `evaluate_client_relevance_qna` | Evaluate client relevance with the `qna` binary on containers or admin-inventoried hosts - about a second per warm run. Never touches the BigFix deployment. |
+| `list_qna_targets` | List the admin-configured inventory targets and whether container images are allowed. |
 
 ### Write tools (opt-in)
 
@@ -70,6 +94,9 @@ pull on demand rather than repeating it in every tool description:
 | `bigfix://relevance/session-cookbook` | Session relevance that works - every expression verified against a live root server - plus the operators that don't exist. |
 | `bigfix://relevance/client-cookbook` | Client (fast query) relevance, targeting forms, reading cumulative results. |
 | `bigfix://guide/tools` | Which tool answers which question, how to read bounded responses, what operator scope means. |
+| `bigfix://relevance/reference/dialects` | Client versus session relevance: where each is evaluated, which one a tool expects. |
+| `bigfix://relevance/reference/client-relevance` | Client relevance language reference (from bigfix-relevance-analyzer). |
+| `bigfix://relevance/reference/session-relevance` | Session relevance language reference (from bigfix-relevance-analyzer). |
 
 Prompts: `diagnose_computer`, `patch_status`, `find_stale_agents`,
 `troubleshoot_relevance`.
@@ -105,6 +132,8 @@ Environment variables win over config files:
 | Password | `BES_PASSWORD` | - |
 | Write tools | `BIGFIX_ALLOW_WRITES`: `true` to register them | off |
 | TLS verification | `BES_SSL_VERIFY`: `false`, `true`, or a CA bundle path | `false` (besapi default) |
+| qna inventory | `BIGFIX_QNA_INVENTORY`: path to a hosts.toml (see [qna evaluation](#qna-evaluation)) | unset |
+| qna containers | `BIGFIX_QNA_CONTAINERS`: `0` to forbid container-image targets | on when `[qna]` installed |
 
 Config files are searched in besapi's order: `/etc/besapi.conf`,
 `~/besapi.conf`, `~/.besapi.conf`, `./besapi.conf` - same
@@ -210,6 +239,37 @@ this caveat so LLM clients don't overstate scoped results.
   `BES_SSL_VERIFY=true` (or a CA bundle path) for anything beyond a lab.
 - Generic BigFix logic here is written to be upstreamed into besapi - see
   [docs/besapi-proposals.md](docs/besapi-proposals.md).
+
+## qna evaluation
+
+`pip install "bigfix-root-mcp[qna]"` adds
+[bigfix-remote-client-relevance](https://github.com/jgstew/bigfix-remote-client-relevance)
+and registers `evaluate_client_relevance_qna` / `list_qna_targets` (with the
+extra absent, the tools do not exist). It evaluates **client** relevance with
+the BigFix `qna` binary on lab targets in about a second per warm run - the
+fast half of the feedback loop next to the advisory analysis.
+
+**What it is not:** qna runs on the target machine, *not* through the BigFix
+deployment. No operator scope, no site subscriptions, no client settings -
+inspectors that depend on deployment state will differ from `client_query`.
+Iterate here, confirm on real agents with `client_query`. (The package's
+Fast Query transport is an upstream stub; this server does not expose it.)
+
+Targets are deliberately constrained:
+
+- **Container images** (`ubuntu:22.04`, ...) may be passed by the caller;
+  needs docker or podman on the server host. First use of an image is slow
+  (agent artifact download + derived image build); later runs are ~1s. Set
+  `BIGFIX_QNA_CONTAINERS=0` to forbid these.
+- **Inventory hosts** come only from an admin-configured hosts.toml named by
+  `BIGFIX_QNA_INVENTORY` (the package's inventory format: ssh/local/container
+  entries). The MCP client can pick entries by name but can never supply ssh
+  hosts, users, or `become` flags of its own.
+
+Security notes: qna executes on the targets; the controller downloads BigFix
+agent artifacts from support.bigfix.com (SHA256-verified against the release
+site's sums) on first use of a version, so the server host makes outbound
+requests; every run leaves a `BIGFIX QNA` audit line on stderr.
 
 ## Writes
 

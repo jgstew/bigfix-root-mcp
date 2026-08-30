@@ -196,3 +196,53 @@ The parts that can only be confirmed against a real root server - the
 verified live and the findings recorded in
 [client-query.md](client-query.md) and
 [besapi-notes.md](besapi-notes.md).
+
+## Advisory relevance analysis (bigfix-relevance-analyzer)
+
+The relevance-taking tools preflight their relevance through
+`bigfix-relevance-analyzer` before sending it, with the dialect pinned per
+tool (`session` for `session_relevance_query`, `client` for the client query
+tools, including `target_relevance`). Two rules shape the design:
+
+- **Advisory, never blocking.** Even a query the analyzer rejects is sent to
+  the server. The analyzer's inspector tables are a snapshot of reference
+  dumps, not a specification: an unknown inspector is a warning by the
+  package's own design, and the live server is always authoritative.
+  `preflight()` never raises - an analyzer bug must not break a server call.
+- **Attach only when there are findings.** A clean query - the common case -
+  adds zero tokens to the response. There is no `"analysis": {"ok": true}`
+  noise; the `analysis` key existing *is* the signal.
+
+On a server-side relevance error, the advisory is appended to the ToolError
+as a `Static analysis:` block (after the existing `Hint:` from errors.py,
+which stays analyzer-agnostic - the enrichment lives at the call site in
+server.py). The analyzer pin is `>=1.8.3,<2`; snapshot drift against a newer
+root server is exactly why findings stay advisory.
+
+## qna evaluation gate (bigfix-remote-client-relevance)
+
+`evaluate_client_relevance_qna` runs relevance through the `qna` binary on
+lab targets - it never touches the BigFix deployment (the package's
+FastQuery transport is an upstream stub and is deliberately unexposed).
+Design choices:
+
+- **Optional extra, registration-gated.** The package drags docker/asyncssh,
+  so it lives in the `[qna]` extra, imported lazily through one seam
+  (`qna._qna()`). Tools register only when the package is importable *and* a
+  target source is allowed - same "registered tools are the boundary"
+  pattern as writes.
+- **Target policy: admin inventory plus container images.** Inventory
+  entries come from a hosts.toml named by `BIGFIX_QNA_INVENTORY` and pass
+  through exactly as the admin wrote them; callers may add container image
+  names (validated against an image-reference pattern). The package's
+  `Target` constructor is never exposed to tool parameters: no
+  caller-supplied ssh hosts, users, or become flags.
+- **Containers default on.** Installing the extra is the opt-in act -
+  containers are ephemeral and run on the operator's own engine. Set
+  `BIGFIX_QNA_CONTAINERS=0` to restrict targets to the inventory file.
+- **Audit line per run** (`BIGFIX QNA ...` on stderr), mirroring the write
+  audit: qna executes a binary on targets and downloads agent artifacts.
+
+Tests fake the package at the `sys.modules` seam (`tests/test_qna.py`), so
+the suite needs neither the extra nor docker; the gate reload pattern is the
+same as `tests/test_writes.py`.
