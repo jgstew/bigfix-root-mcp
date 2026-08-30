@@ -45,6 +45,32 @@ class TestSessionRelevance:
             await call("session_relevance_query", {"relevance": "names of bes users"})
 
 
+class TestAnalysisTools:
+    """Offline static-analysis tools: no connection, no fake_conn needed."""
+
+    async def test_analyze_relevance_reports_parse_error_in_band(self):
+        result = await call("analyze_relevance", {"relevance": "number of of bes computers"})
+        assert result.data["parsed"] is False
+        assert result.data["parse_error"]
+
+    async def test_analyze_relevance_clean_query(self):
+        result = await call(
+            "analyze_relevance",
+            {"relevance": "number of bes computers", "dialect": "session"},
+        )
+        assert result.data["parsed"] is True
+        assert result.data["dialect"]["effective"] == "session"
+
+    async def test_analyze_relevance_rejects_bad_dialect(self):
+        with pytest.raises(ToolError, match="dialect"):
+            await call("analyze_relevance", {"relevance": "true", "dialect": "bogus"})
+
+    async def test_search_inspectors_finds_session_inspector(self):
+        result = await call("search_inspectors", {"query": "bes computers"})
+        assert result.data["matches"]
+        assert any("bes computer" in m["name"] for m in result.data["matches"])
+
+
 class TestClientQueryTools:
     async def test_submit_returns_id_and_expected_count(self, fake_conn):
         fake_conn.post_responses.append(FakeRESTResult(text=SUBMIT_RESPONSE_XML))
@@ -388,6 +414,9 @@ class TestToolSurface:
             tools = {tool.name for tool in await client.list_tools()}
         assert tools == {
             "session_relevance_query",
+            # offline static analysis - no server contact at all
+            "analyze_relevance",
+            "search_inspectors",
             "client_query_submit",
             "client_query_results",
             "client_query",

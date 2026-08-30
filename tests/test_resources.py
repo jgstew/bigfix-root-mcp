@@ -9,6 +9,10 @@ EXPECTED_RESOURCES = {
     "bigfix://relevance/session-cookbook",
     "bigfix://relevance/client-cookbook",
     "bigfix://guide/tools",
+    # served from the bigfix-relevance-analyzer package, not resources/*.md
+    "bigfix://relevance/reference/dialects",
+    "bigfix://relevance/reference/client-relevance",
+    "bigfix://relevance/reference/session-relevance",
 }
 
 EXPECTED_PROMPTS = {

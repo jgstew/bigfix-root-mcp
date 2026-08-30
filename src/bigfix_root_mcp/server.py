@@ -25,6 +25,7 @@ from pydantic import Field
 from bigfix_root_mcp import (
     __version__,
     actions,
+    analysis,
     besxml,
     clientquery,
     connection,
@@ -123,6 +124,30 @@ _RESOURCES = {
 }
 
 
+# Reference documents shipped inside bigfix-relevance-analyzer. Titles and
+# summaries are hardcoded (matching _RESOURCES style) so registration stays
+# import-free; the analyzer's `reference` module is deliberately not imported
+# at its package root, and the lazy import below keeps that true here until a
+# client actually reads one.
+_ANALYZER_RESOURCES = {
+    "bigfix://relevance/reference/dialects": (
+        "dialects",
+        "BigFix relevance: client versus session",
+        "The two relevance dialects, where each is evaluated, and which one a tool expects.",
+    ),
+    "bigfix://relevance/reference/client-relevance": (
+        "client-relevance",
+        "BigFix client relevance: language reference",
+        "Writing relevance evaluated on the endpoint: inspectors, types, and idioms.",
+    ),
+    "bigfix://relevance/reference/session-relevance": (
+        "session-relevance",
+        "BigFix session relevance: language reference",
+        "Writing relevance evaluated on the server against the BigFix object model.",
+    ),
+}
+
+
 def _read_resource_file(filename: str) -> str:
     return (
         importlib.resources.files(__package__)
@@ -144,11 +169,29 @@ def _make_loader(filename: str):
     return _load
 
 
+def _make_reference_loader(slug: str):
+    """Zero-arg loader for one analyzer reference document (see _make_loader)."""
+
+    def _load() -> str:
+        from bigfix_relevance_analyzer import reference  # noqa: PLC0415 - lazy on purpose
+
+        for document in reference.documents():
+            if document.slug == slug:
+                return document.read()
+        raise ValueError(f"analyzer reference document {slug!r} not found")
+
+    return _load
+
+
 def _register_resources() -> None:
     """Register each markdown file as an MCP resource."""
     for uri, (filename, name, description) in _RESOURCES.items():
         mcp.resource(uri, name=name, description=description, mime_type="text/markdown")(
             _make_loader(filename)
+        )
+    for uri, (slug, name, description) in _ANALYZER_RESOURCES.items():
+        mcp.resource(uri, name=name, description=description, mime_type="text/markdown")(
+            _make_reference_loader(slug)
         )
 
 
@@ -199,6 +242,87 @@ def session_relevance_query(
     conn = connection.get_connection()
     envelope = conn.session_relevance_json(relevance)
     return _bound_rows(check_relevance_envelope(envelope), "result", limit, offset)
+
+
+@mcp.tool
+@bes_errors("analyze_relevance")
+def analyze_relevance(
+    relevance: Annotated[
+        str,
+        Field(description="Relevance expression to analyze. It is never evaluated."),
+    ],
+    dialect: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Pin the dialect: 'session' (root server) or 'client' (agent). "
+                "Default: classify automatically from the text."
+            )
+        ),
+    ] = None,
+    platform: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Narrow client inspector lookups to one platform, e.g. 'windows', "
+                "'macos', 'ubuntu'."
+            )
+        ),
+    ] = None,
+    include_sexpr: Annotated[
+        bool,
+        Field(description="Include the parsed tree as an S-expression."),
+    ] = False,
+) -> dict:
+    """Statically analyze a relevance expression WITHOUT evaluating it anywhere.
+
+    Offline and instant: checks that the expression parses (with a positioned
+    error when it does not), infers types, classifies the dialect (session vs
+    client), flags inspectors no reference dump defines, finds unbound 'it',
+    and scores complexity/evaluation cost. Use it to validate a query before
+    session_relevance_query or client_query, or to understand a relevance
+    error after one.
+
+    Advisory: the inspector table is a snapshot, so an unknown inspector is a
+    warning (the live server may still know it), and a clean report does not
+    guarantee the server will accept the query.
+    """
+    return analysis.analyze(relevance, dialect, platform, include_sexpr)
+
+
+@mcp.tool
+@bes_errors("search_inspectors")
+def search_inspectors(
+    query: Annotated[
+        str,
+        Field(description="Inspector name or phrase, e.g. 'registry key', 'bes computers'."),
+    ],
+    dialect: Annotated[
+        str | None,
+        Field(description="'session' or 'client' to filter; default searches both."),
+    ] = None,
+    kind: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Filter by inspector kind: 'property', 'cast', 'binary-operator' "
+                "or 'unary-operator'."
+            )
+        ),
+    ] = None,
+    limit: Annotated[
+        int,
+        Field(description=f"Max matches to return (1-{analysis.MAX_SEARCH_LIMIT})."),
+    ] = 10,
+) -> dict:
+    """Search the BigFix inspector reference (offline snapshot; no server call).
+
+    Fuzzy: returns exact, prefix and near-miss matches with signatures, result
+    types and the dialect each inspector exists in. Use it before writing a
+    query, or after an 'is not defined' error to find the right name. Snapshot
+    caveat: absence here does not prove absence on the live server.
+    """
+    return analysis.search(query, dialect, kind, limit)
 
 
 @mcp.tool(description=f"Submit a BigFix client (fast) query. {TARGETING_DESCRIPTION}")
