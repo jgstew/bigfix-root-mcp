@@ -121,8 +121,11 @@ def error_appendix(advisory: dict | None) -> str:
     lines = []
     for finding in advisory.get("findings", []):
         line = f"- {finding['code']}: {finding['message']}"
-        if finding.get("suggestions"):
-            line += " (did you mean: " + ", ".join(finding["suggestions"]) + ")"
+        # unknown-inspector messages already say "did you mean" when suggest=True;
+        # only append suggestions the message does not already carry
+        missing = [s for s in finding.get("suggestions", ()) if s not in finding["message"]]
+        if missing:
+            line += " (did you mean: " + ", ".join(missing) + ")"
         lines.append(line)
     if advisory.get("dialect_mismatch"):
         lines.append(f"- {advisory['dialect_mismatch']}")
