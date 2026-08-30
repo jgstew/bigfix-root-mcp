@@ -947,6 +947,16 @@ if QNA_ENABLED:
                 )
             ),
         ] = None,
+        qna_version: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "BigFix agent/qna version to provision on targets, e.g. '11.0'. "
+                    "Required for plain container images (they have no qna baked "
+                    "in); the first use of a version downloads and caches it."
+                )
+            ),
+        ] = None,
         timeout_seconds: Annotated[
             float,
             Field(description=f"Per-target timeout (1-{qna.MAX_QNA_TIMEOUT_SECONDS})."),
@@ -979,7 +989,7 @@ if QNA_ENABLED:
             relevance[:200],
             [target.label for target in targets],
         )
-        total = pkg.count_work(targets)
+        total = pkg.count_work(targets, qna_version)
         await ctx.report_progress(
             progress=0,
             total=total,
@@ -989,6 +999,7 @@ if QNA_ENABLED:
         async for result in pkg.evaluate_client_relevance_stream(
             relevance,
             targets,
+            qna_version=qna_version,
             max_parallel=min(qna.MAX_PARALLEL, len(targets)),
             timeout_s=timeout_seconds,
         ):

@@ -454,7 +454,7 @@ class TestToolSurface:
         """Read-only guard: the registered tool list IS the security surface."""
         async with Client(server.mcp) as client:
             tools = {tool.name for tool in await client.list_tools()}
-        assert tools == {
+        expected = {
             "session_relevance_query",
             # offline static analysis - no server contact at all
             "analyze_relevance",
@@ -481,3 +481,7 @@ class TestToolSurface:
             "list_roles",
             "validate_bes_xml",
         }
+        # present only in a venv with the [qna] extra installed (gate on)
+        if server.QNA_ENABLED:
+            expected |= {"evaluate_client_relevance_qna", "list_qna_targets"}
+        assert tools == expected

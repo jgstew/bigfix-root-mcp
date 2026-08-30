@@ -151,10 +151,26 @@ class TestResolveTargets:
             qna.resolve_targets(None, images)
 
 
+@pytest.fixture
+def ungated(monkeypatch):
+    """A server module reloaded with every qna target source disabled.
+
+    The gate must be forced off rather than assumed off: a dev venv with the
+    [qna] extra installed has the package importable, and these tests must
+    hold either way.
+    """
+    monkeypatch.setenv("BIGFIX_QNA_CONTAINERS", "0")
+    monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
+    reloaded = importlib.reload(server)
+    yield reloaded
+    monkeypatch.undo()
+    importlib.reload(server)
+
+
 class TestQnaGate:
-    async def test_qna_tools_absent_by_default(self):
+    async def test_qna_tools_absent_when_gate_off(self, ungated):
         """Paired with the gate-on test below: alone this would pass trivially."""
-        async with Client(server.mcp) as client:
+        async with Client(ungated.mcp) as client:
             tools = {tool.name for tool in await client.list_tools()}
         assert not (tools & QNA_TOOLS)
 
@@ -168,8 +184,8 @@ class TestQnaGate:
         monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
         assert qna.qna_enabled() is False
 
-    async def test_whoami_reports_the_gate_state(self, fake_conn):
-        async with Client(server.mcp) as client:
+    async def test_whoami_reports_the_gate_state(self, ungated, fake_conn):
+        async with Client(ungated.mcp) as client:
             result = await client.call_tool("whoami", {})
         assert result.data["qna_enabled"] is False
 
@@ -222,6 +238,22 @@ class TestEvaluateClientRelevanceQna:
         )
         evaluate = next(c for c in fake_pkg.calls if c[0] == "evaluate")
         assert evaluate[3]["timeout_s"] == qna.MAX_QNA_TIMEOUT_SECONDS
+
+    async def test_qna_version_passes_through(self, gated, fake_pkg):
+        """A plain container image has no qna baked in; the version must be
+        forwardable or container targets can never provision one."""
+        fake_pkg.scripted_results = [fake_pkg.FakeResult(host="container:ubuntu:22.04")]
+        await call(
+            gated,
+            "evaluate_client_relevance_qna",
+            {
+                "relevance": "true",
+                "container_images": ["ubuntu:22.04"],
+                "qna_version": "11.0",
+            },
+        )
+        evaluate = next(c for c in fake_pkg.calls if c[0] == "evaluate")
+        assert evaluate[3]["qna_version"] == "11.0"
 
     async def test_flagged_relevance_carries_advisory(self, gated, fake_pkg):
         fake_pkg.scripted_results = [fake_pkg.FakeResult(host="container:ubuntu:22.04")]
