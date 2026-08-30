@@ -59,6 +59,31 @@ LIMIT_FIELD = Field(
 OFFSET_FIELD = Field(default=0, description="Row offset, for paging through results.")
 
 
+def _with_advisory(payload: dict, advisory: dict | None) -> dict:
+    """Attach a static-analysis advisory, only when it has something to say.
+
+    A clean query (the common case) adds zero tokens to the response.
+    """
+    if advisory:
+        payload["analysis"] = advisory
+    return payload
+
+
+def _client_query_advisory(query_text: str, target_relevance: str | None) -> dict | None:
+    """Preflight a client query's relevance and its targeting relevance.
+
+    Targeting typos deserve the same advisory: bad target_relevance silently
+    targets zero machines, which looks like 'no results' rather than an error.
+    """
+    advisory = analysis.preflight(query_text, dialect="client")
+    if target_relevance:
+        target_advisory = analysis.preflight(target_relevance, dialect="client")
+        if target_advisory:
+            advisory = dict(advisory) if advisory else {"note": target_advisory["note"]}
+            advisory["target_relevance_findings"] = target_advisory["findings"]
+    return advisory
+
+
 def _bound_rows(payload: dict, key: str, limit, offset) -> dict:
     """Window the row list under `key`, merging the bounding metadata in.
 
@@ -239,9 +264,19 @@ def session_relevance_query(
     what exists - report them as visible to this operator, not as the
     complete state of BigFix.
     """
+    # advisory only: even a query the analyzer rejects is still sent - the
+    # server is authoritative and the analyzer's tables are a snapshot
+    advisory = analysis.preflight(relevance, dialect="session")
     conn = connection.get_connection()
     envelope = conn.session_relevance_json(relevance)
-    return _bound_rows(check_relevance_envelope(envelope), "result", limit, offset)
+    try:
+        payload = check_relevance_envelope(envelope)
+    except ToolError as err:
+        appendix = analysis.error_appendix(advisory)
+        if appendix:
+            raise ToolError(f"{err}\n\nStatic analysis:\n{appendix}") from None
+        raise
+    return _with_advisory(_bound_rows(payload, "result", limit, offset), advisory)
 
 
 @mcp.tool
@@ -351,6 +386,9 @@ def client_query_submit(
     tool to submit and wait in one call. expected_count is the number of
     targeted computers when knowable, else null.
     """
+    # the core feedback-loop win: a typo'd inspector surfaces here, in the
+    # submit response, instead of as per-computer errors a minute later
+    advisory = _client_query_advisory(query_text, target_relevance)
     conn = connection.get_connection()
     target_xml, expected_count = clientquery.build_target_xml(
         target_all=target_all,
@@ -359,7 +397,7 @@ def client_query_submit(
         target_relevance=target_relevance,
     )
     query_id = clientquery.submit_client_query(conn, query_text, target_xml)
-    return {"query_id": query_id, "expected_count": expected_count}
+    return _with_advisory({"query_id": query_id, "expected_count": expected_count}, advisory)
 
 
 @mcp.tool
@@ -443,6 +481,8 @@ async def client_query(
     results at timeout are normal (offline agents never report). For very
     long waits, prefer client_query_submit + client_query_results.
     """
+    # advisory preflight before spending up to timeout_seconds polling
+    advisory = _client_query_advisory(query_text, target_relevance)
     conn = connection.get_connection()
     timeout_seconds = max(1, min(timeout_seconds, MAX_TIMEOUT_SECONDS))
     poll_interval_seconds = max(poll_interval_seconds, MIN_POLL_INTERVAL_SECONDS)
@@ -477,7 +517,7 @@ async def client_query(
         expected_count=expected_count,
         progress_cb=progress_cb,
     )
-    return _bound_rows(summary, "results", limit, offset)
+    return _with_advisory(_bound_rows(summary, "results", limit, offset), advisory)
 
 
 @mcp.tool

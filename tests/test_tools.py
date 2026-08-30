@@ -71,6 +71,48 @@ class TestAnalysisTools:
         assert any("bes computer" in m["name"] for m in result.data["matches"])
 
 
+class TestAdvisoryPreflight:
+    """Static analysis rides along with relevance tools but never blocks them."""
+
+    async def test_parse_error_still_goes_to_server(self, fake_conn):
+        fake_conn.relevance_responses.append({"result": [], "evaltime_ms": 1})
+        result = await call("session_relevance_query", {"relevance": "number of of bes computers"})
+        # non-blocking: the server was still asked, findings ride alongside
+        assert fake_conn.calls[0][0] == "session_relevance_json"
+        codes = [f["code"] for f in result.data["analysis"]["findings"]]
+        assert "parse-error" in codes
+
+    async def test_clean_query_has_no_analysis_key(self, fake_conn):
+        fake_conn.relevance_responses.append({"result": [1], "evaltime_ms": 1})
+        result = await call("session_relevance_query", {"relevance": "number of bes computers"})
+        assert "analysis" not in result.data
+
+    async def test_server_error_enriched_with_static_analysis(self, fake_conn):
+        fake_conn.relevance_responses.append({"error": 'The operator "firsts" is not defined.'})
+        with pytest.raises(ToolError) as excinfo:
+            await call("session_relevance_query", {"relevance": "firsts 10 of bes computers"})
+        message = str(excinfo.value)
+        assert "Hint:" in message  # the existing _relevance_hint path
+        assert "Static analysis:" in message  # the analyzer appendix
+
+    async def test_client_query_submit_carries_analysis(self, fake_conn):
+        fake_conn.post_responses.append(FakeRESTResult(text=SUBMIT_RESPONSE_XML))
+        result = await call(
+            "client_query_submit",
+            {"query_text": "namez of operating systemz", "target_computer_ids": [10]},
+        )
+        assert result.data["query_id"] == 42
+        assert result.data["analysis"]["findings"]
+
+    async def test_target_relevance_is_preflighted(self, fake_conn):
+        fake_conn.post_responses.append(FakeRESTResult(text=SUBMIT_RESPONSE_XML))
+        result = await call(
+            "client_query_submit",
+            {"query_text": "computer name", "target_relevance": "namez of operating systemz"},
+        )
+        assert result.data["analysis"]["target_relevance_findings"]
+
+
 class TestClientQueryTools:
     async def test_submit_returns_id_and_expected_count(self, fake_conn):
         fake_conn.post_responses.append(FakeRESTResult(text=SUBMIT_RESPONSE_XML))
