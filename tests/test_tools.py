@@ -485,3 +485,32 @@ class TestToolSurface:
         if server.QNA_ENABLED:
             expected |= {"evaluate_client_relevance_qna", "list_qna_targets"}
         assert tools == expected
+
+
+class TestMainTransport:
+    """main() serves stdio by default; BIGFIX_MCP_TRANSPORT=http serves HTTP."""
+
+    def _run_main(self, monkeypatch):
+        runs = []
+        monkeypatch.setattr(server.mcp, "run", lambda **kwargs: runs.append(kwargs))
+        server.main()
+        assert len(runs) == 1
+        return runs[0]
+
+    def test_default_is_stdio_without_banner(self, monkeypatch):
+        monkeypatch.delenv("BIGFIX_MCP_TRANSPORT", raising=False)
+        kwargs = self._run_main(monkeypatch)
+        # stdout belongs to the stdio transport, so no banner and no transport
+        # override (FastMCP's default is stdio)
+        assert kwargs == {"show_banner": False}
+
+    def test_http_enables_the_banner(self, monkeypatch):
+        monkeypatch.setenv("BIGFIX_MCP_TRANSPORT", "http")
+        kwargs = self._run_main(monkeypatch)
+        assert kwargs["transport"] == "http"
+        assert kwargs["show_banner"] is True
+
+    def test_unknown_transport_is_refused(self, monkeypatch):
+        monkeypatch.setenv("BIGFIX_MCP_TRANSPORT", "carrier-pigeon")
+        with pytest.raises(SystemExit, match="BIGFIX_MCP_TRANSPORT"):
+            server.main()

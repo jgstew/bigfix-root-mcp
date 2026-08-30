@@ -134,6 +134,7 @@ Environment variables win over config files:
 | TLS verification | `BES_SSL_VERIFY`: `false`, `true`, or a CA bundle path | `false` (besapi default) |
 | qna inventory | `BIGFIX_QNA_INVENTORY`: path to a hosts.toml (see [qna evaluation](#qna-evaluation)) | unset |
 | qna containers | `BIGFIX_QNA_CONTAINERS`: `0` to forbid container-image targets | on when `[qna]` installed |
+| Transport | `BIGFIX_MCP_TRANSPORT`: `stdio` or `http` (streamable HTTP on 127.0.0.1:8000/mcp, banner on). No auth layer of its own - put authentication in front before binding beyond localhost. | `stdio` |
 
 Config files are searched in besapi's order: `/etc/besapi.conf`,
 `~/besapi.conf`, `~/.besapi.conf`, `./besapi.conf` - same

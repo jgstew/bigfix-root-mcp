@@ -13,6 +13,7 @@ that need a site take an explicit site_path parameter.
 import importlib.resources
 import json
 import logging
+import os
 import sys
 from typing import Annotated
 
@@ -1136,7 +1137,13 @@ if WRITES_ENABLED:
 
 
 def main() -> None:
-    """Entry point: stderr-only logging, then serve MCP over stdio."""
+    """Entry point: stderr-only logging, then serve MCP over stdio or HTTP.
+
+    BIGFIX_MCP_TRANSPORT=http serves streamable HTTP on FastMCP's defaults
+    (127.0.0.1:8000). There is no auth layer here: anyone who can reach the
+    port acts as the configured operator, so put authentication in front
+    before binding beyond localhost.
+    """
     # stdout belongs to the MCP stdio transport; all logging (including the
     # besapi logger, which propagates to root) must go to stderr.
     logging.basicConfig(
@@ -1144,7 +1151,14 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(name)s %(levelname)s: %(message)s",
     )
-    mcp.run(show_banner=False)
+    transport = os.environ.get("BIGFIX_MCP_TRANSPORT", "stdio").strip().lower()
+    if transport == "stdio":
+        mcp.run(show_banner=False)
+    elif transport == "http":
+        # stdout is free over HTTP, so the banner (with the URL) is useful
+        mcp.run(transport="http", show_banner=True)
+    else:
+        raise SystemExit(f"BIGFIX_MCP_TRANSPORT must be 'stdio' or 'http', got {transport!r}")
 
 
 if __name__ == "__main__":
