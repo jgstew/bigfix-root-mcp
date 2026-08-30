@@ -16,7 +16,8 @@ from fastmcp.exceptions import ToolError
 _SNIPPET_LEN = 500
 
 
-def _snippet(text: str) -> str:
+def _snippet(text: object) -> str:
+    """Trim any value's string form to a readable length for an error message."""
     text = str(text).strip()
     if len(text) > _SNIPPET_LEN:
         return text[:_SNIPPET_LEN] + "..."
@@ -31,7 +32,7 @@ def check_rest_result(result, context: str):
     status = result.request.status_code
     if not 200 <= status < 300:
         raise ToolError(
-            f"{context}: BigFix REST API returned HTTP {status}: " f"{_snippet(result.text)}"
+            f"{context}: BigFix REST API returned HTTP {status}: {_snippet(result.text)}"
         )
     return result
 

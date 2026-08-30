@@ -60,7 +60,7 @@ def validate_path_segment(path: str, label: str = "site_path") -> str:
             raise ValueError(f"{label} contains an empty segment: {path!r}")
         if decoded.strip() in (".", ".."):
             raise ValueError(
-                f"{label} must not contain '.' or '..' path segments " f"(encoded or not): {path!r}"
+                f"{label} must not contain '.' or '..' path segments (encoded or not): {path!r}"
             )
         encoded.append(urllib.parse.quote(decoded, safe=""))
     return "/".join(encoded)

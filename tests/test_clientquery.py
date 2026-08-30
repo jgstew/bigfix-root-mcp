@@ -45,7 +45,7 @@ class TestBuildTargetXml:
     def test_computer_ids(self):
         xml_out, count = clientquery.build_target_xml(computer_ids=[1, 2, 3])
         assert xml_out == (
-            "<ComputerID>1</ComputerID><ComputerID>2</ComputerID>" "<ComputerID>3</ComputerID>"
+            "<ComputerID>1</ComputerID><ComputerID>2</ComputerID><ComputerID>3</ComputerID>"
         )
         assert count == 3
 
@@ -75,8 +75,7 @@ class TestBuildTargetXml:
 class TestBuildClientQueryXml:
     def test_query_text_escaped(self):
         payload = clientquery.build_client_query_xml(
-            'exists files whose (name of it contains "]]>") of folder "c:\\" '
-            "whose (1 < 2 & true)",
+            'exists files whose (name of it contains "]]>") of folder "c:\\" whose (1 < 2 & true)',
             "<AllComputers>true</AllComputers>",
         )
         assert "]]>" not in payload.split("<QueryText>")[1].split("</QueryText>")[0]

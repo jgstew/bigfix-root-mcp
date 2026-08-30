@@ -9,7 +9,7 @@ import bigfix_root_mcp.connection as connection_module
 class FakeResponse:
     """Mimics the requests.Response held by besapi's RESTResult."""
 
-    def __init__(self, status_code=200, text="", headers=None, url=""):
+    def __init__(self, status_code=200, text="", headers=None, url="") -> None:
         self.status_code = status_code
         self.text = text
         self.headers = headers or {"content-type": "application/xml"}
@@ -27,7 +27,7 @@ class FakeResponse:
 class FakeRESTResult:
     """Mimics besapi.besapi.RESTResult closely enough for the wrapper."""
 
-    def __init__(self, text="", status_code=200, headers=None, url=""):
+    def __init__(self, text="", status_code=200, headers=None, url="") -> None:
         self.text = text
         self.request = FakeResponse(status_code=status_code, text=text, headers=headers, url=url)
 
@@ -51,7 +51,7 @@ class FakeBESConnection:
     rootserver_port = 52311
     username = "testoperator"
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.calls = []
         # map of (method, path-prefix) is overkill; simple FIFO queues per verb
         self.get_responses = []

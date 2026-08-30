@@ -110,7 +110,7 @@ _RESOURCES = {
     "bigfix://relevance/client-cookbook": (
         "client-cookbook.md",
         "Client relevance cookbook",
-        ("Client (fast query) relevance, targeting forms, and how to read " "cumulative results."),
+        "Client (fast query) relevance, targeting forms, and how to read cumulative results.",
     ),
     "bigfix://guide/tools": (
         "tool-guide.md",
@@ -467,7 +467,7 @@ def applicable_fixlets(
     )
     return response.bound_mapping(
         besxml.xml_to_dict(result.text),
-        hint=("Use session_relevance_query for a counted or filtered view of " "relevant content."),
+        hint="Use session_relevance_query for a counted or filtered view of relevant content.",
     )
 
 
@@ -673,7 +673,7 @@ def api_get(
         int | None,
         Field(
             description=(
-                f"Max characters of response text (default " f"{response.MAX_RESPONSE_CHARS})."
+                f"Max characters of response text (default {response.MAX_RESPONSE_CHARS})."
             )
         ),
     ] = None,
@@ -688,7 +688,7 @@ def api_get(
     path = path.removeprefix("api/")
     if "://" in path or path.startswith("..") or not path:
         raise ToolError(
-            "path must be a relative BigFix REST API path such as 'help' or " "'computers'."
+            "path must be a relative BigFix REST API path such as 'help' or 'computers'."
         )
     conn = connection.get_connection()
     result = check_rest_result(conn.get(path), "api_get")
@@ -718,7 +718,7 @@ def _audit(tool: str, target: str, dry_run: bool, outcome: str) -> None:
     """One structured stderr line per write attempt."""
     conn = connection.get_connection()
     logger.info(
-        "BIGFIX WRITE tool=%s operator=%s rootserver=%s target=%s " "dry_run=%s outcome=%s",
+        "BIGFIX WRITE tool=%s operator=%s rootserver=%s target=%s dry_run=%s outcome=%s",
         tool,
         conn.username,
         conn.rootserver,
@@ -802,8 +802,7 @@ if WRITES_ENABLED:
             str,
             Field(
                 description=(
-                    "Target site path, e.g. 'custom/MySite'. Import targets a "
-                    "custom site you own."
+                    "Target site path, e.g. 'custom/MySite'. Import targets a custom site you own."
                 )
             ),
         ],
@@ -826,7 +825,7 @@ if WRITES_ENABLED:
         if not verdict["valid"]:
             _audit("import_bes_content", path, dry_run, "invalid_xml")
             raise ToolError(
-                f"import_bes_content: bes_xml is not valid BES content: " f"{verdict['reason']}"
+                f"import_bes_content: bes_xml is not valid BES content: {verdict['reason']}"
             )
         if dry_run:
             _audit("import_bes_content", path, True, "not_sent")

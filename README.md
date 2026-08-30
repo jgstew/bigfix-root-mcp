@@ -130,11 +130,11 @@ Example MCP client config (see [.mcp.json](.mcp.json)):
 pip install bigfix-root-mcp   # or: uvx bigfix-root-mcp
 ```
 
-From a checkout:
+From a checkout ([uv](https://docs.astral.sh/uv/) required, 0.12+):
 
 ```bash
-pip install -e ".[dev]"
-bigfix-root-mcp               # or: python -m bigfix_root_mcp
+uv sync
+uv run bigfix-root-mcp        # or: uv run python -m bigfix_root_mcp
 ```
 
 Smoke test against a live root server with MCP Inspector:
@@ -219,9 +219,29 @@ here.
 
 ## Development
 
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/) 0.12+. `uv sync`
+creates `.venv` from the committed `uv.lock` and installs the `dev` dependency
+group; no manual venv or `pip install -e` step.
+
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest
+uv sync
+uv run pytest
+```
+
+Linting, formatting, type checking and the packaging checks all run through
+pre-commit (ruff, mypy, bandit, slyp, zizmor, and the uv lock/build checks).
+Install both hook types - some checks are deliberately deferred to `pre-push`
+because they are too slow to want on every commit:
+
+```bash
+uv run pre-commit install --hook-type pre-commit --hook-type pre-push
+```
+
+Useful invocations:
+
+```bash
+uv run pre-commit run --all-files                    # the commit-stage hooks
+uv run pre-commit run --all-files --hook-stage manual  # everything, as CI runs it
 ```
 
 Tests run entirely offline against a scripted fake `BESConnection`, including

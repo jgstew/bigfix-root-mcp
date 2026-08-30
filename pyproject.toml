@@ -1,54 +1,106 @@
 [build-system]
-requires = ["setuptools>=64"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "bigfix-root-mcp"
 description = "A minimal read-only MCP server around the besapi library (BigFix REST API)"
 readme = "README.md"
-requires-python = ">=3.10"
-license = { text = "MIT" }
+requires-python = ">=3.11"
+license = "MIT"
 dynamic = ["version"]
+authors = [
+    { name = "JGStew", email = "admin@jgstew.com" },
+]
+keywords = ["bigfix", "mcp", "besapi", "rest-api"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: System Administrators",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 dependencies = [
     "besapi>=4.1.5",
     "fastmcp==4.0.0b1",
+    # imported directly by src/ (besxml.py, errors.py, server.py). They do
+    # arrive transitively via besapi/fastmcp today, but a package should
+    # depend on what it imports rather than on another package's dependency
+    # list staying the same.
+    "lxml",
+    "pydantic",
+    "requests",
 ]
 
 [project.urls]
 Homepage = "https://github.com/jgstew/bigfix-root-mcp"
+Repository = "https://github.com/jgstew/bigfix-root-mcp"
 
 [project.scripts]
 bigfix-root-mcp = "bigfix_root_mcp.server:main"
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
+    "lxml-stubs>=0.5.1",
     "pytest",
     "pytest-asyncio",
+    "pytest-cov",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pre-commit>=3.8",
 ]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.hatch.version]
+path = "src/bigfix_root_mcp/__init__.py"
 
-# the MCP resources are markdown files read at runtime via importlib.resources;
-# without this they are missing from the wheel and every resource read fails
-[tool.setuptools.package-data]
-bigfix_root_mcp = ["resources/*.md"]
+# hatchling ships every file inside the package directory, so the MCP resource
+# markdown (read at runtime via importlib.resources) needs no package-data rule
+# of its own -- unlike setuptools, which dropped it without one.
+[tool.hatch.build.targets.wheel]
+packages = ["src/bigfix_root_mcp"]
 
-[tool.setuptools.dynamic]
-version = { attr = "bigfix_root_mcp.__version__" }
-
+[tool.uv]
+required-version = ">=0.12"
+# Delay dependency resolution by 7 days so newly-published (possibly broken
+# or compromised) releases aren't picked up immediately. Matches the
+# `cooldown` on the uv/github-actions ecosystems in .github/dependabot.yml.
+exclude-newer = "7 days"
 # fastmcp 4.0.0b1 is a meta-package over fastmcp-slim; uv only allows
 # prereleases for explicitly named packages, so constrain the transitive dep:
-[tool.uv]
 constraint-dependencies = ["fastmcp-slim==4.0.0b1"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-# Run without the project installed. The pytest pre-commit hook builds an
-# isolated venv from its additional_dependencies and never installs this
-# package, so `import bigfix_root_mcp` has to resolve from the source tree.
-#   "src" -> the package itself
-#   "."   -> `from tests.conftest import ...`, which otherwise only resolves
-#            because `python -m pytest` happens to put the cwd on sys.path
+# "src" -> the package itself, so the tests import from the source tree rather
+#          than a stale install
+# "."   -> `from tests.conftest import ...`, which otherwise only resolves
+#          because `python -m pytest` happens to put the cwd on sys.path
 pythonpath = ["src", "."]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src"]
+
+# besapi ships no py.typed marker and has no stubs on typeshed, so every
+# symbol from it is Any. Scoped to the one package rather than set globally
+# so a genuinely missing import elsewhere still gets reported.
+[[tool.mypy.overrides]]
+module = ["besapi.*"]
+ignore_missing_imports = true
+
+[tool.ruff]
+target-version = "py311"
+# same width the black hook was configured with before ruff replaced it
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# SIM300: the subset assertions here (`EXPECTED_RESOURCES <= uris`) are set
+# comparisons, not Yoda conditions -- "expected is a subset of what we got" is
+# the direction that reads correctly, and SIM300's suggested `uris >=
+# EXPECTED_RESOURCES` inverts the emphasis for no gain.
+"tests/*" = ["S101", "SIM300"]

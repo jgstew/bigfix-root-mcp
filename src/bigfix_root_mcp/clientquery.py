@@ -76,10 +76,16 @@ def build_target_xml(
         )
         return xml_out, len(computer_names)
 
-    return (
-        f"<CustomRelevance>{xml.sax.saxutils.escape(target_relevance)}</CustomRelevance>",
-        None,
-    )
+    if target_relevance:
+        return (
+            f"<CustomRelevance>{xml.sax.saxutils.escape(target_relevance)}</CustomRelevance>",
+            None,
+        )
+
+    # Unreachable: the exactly-one-mode guard above already rejected the
+    # no-mode case. Spelled out rather than left as a fallthrough so the
+    # function cannot silently return None if that guard is ever changed.
+    raise ValueError("Exactly one targeting mode must be provided.")
 
 
 def build_client_query_xml(query_text: str, target_xml: str) -> str:

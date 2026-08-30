@@ -1,0 +1,111 @@
+---
+name: test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  # so a future release workflow can gate on this exact job rather than
+  # polling for other checks to go green
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Single bump point for the version this package is tested against; keep
+      # it in step with the `classifiers` list in pyproject.toml. Pinned rather
+      # than "3" so a new CPython release does not silently change what CI runs.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.13"
+
+      # single source of truth for the uv version: the `rev` of the
+      # astral-sh/uv-pre-commit repo in .pre-commit-config.yaml, which
+      # `pre-commit autoupdate` already keeps current. Read with awk rather
+      # than a yaml parser so it needs nothing installed first. `rev` is
+      # SHA-pinned (Dependabot's pre-commit ecosystem keeps the trailing
+      # `# X.Y.Z` comment in sync when it bumps the SHA - same convention as
+      # the actions/* pins above), so the version comes from that comment;
+      # fall back to the bare `rev` value for a tag-pinned rev with no
+      # comment. Same step as in .github/workflows/pre-commit.yaml.
+      - name: read uv version from .pre-commit-config.yaml
+        run: |
+          UV_VERSION="$(awk '
+            /^[[:space:]]*-[[:space:]]*repo:.*astral-sh\/uv-pre-commit[[:space:]]*$/ { found = 1; next }
+            found && $1 == "rev:" {
+              if (match($0, /#[ \t]*(frozen:[ \t]*)?[vV]?[0-9]+(\.[0-9]+)*/)) {
+                ver = substr($0, RSTART, RLENGTH)
+                sub(/^#[ \t]*(frozen:[ \t]*)?[vV]?/, "", ver)
+              } else {
+                ver = $2
+                gsub(/["'\'']/, "", ver)
+                sub(/^[vV]/, "", ver)
+              }
+              print ver
+              exit
+            }
+          ' .pre-commit-config.yaml)"
+          if [ -z "$UV_VERSION" ]; then
+            echo "::error::could not read the astral-sh/uv-pre-commit version from .pre-commit-config.yaml"
+            exit 1
+          fi
+          echo "UV_VERSION=$UV_VERSION" >> "$GITHUB_ENV"
+          echo "uv version: $UV_VERSION"
+
+      - name: install uv
+        run: python -m pip install "uv==${UV_VERSION}"
+
+      # no --all-extras: this package declares no optional extras, and the dev
+      # tooling lives in [dependency-groups] dev, which uv syncs by default
+      - name: uv sync --locked
+        run: uv sync --locked
+
+      # flags live in [tool.pytest.ini_options] in pyproject.toml, not here
+      - name: pytest
+        run: uv run --frozen pytest
+
+      - name: uv build (wheel + sdist)
+        run: uv build
+
+      # Exercise the artifact a release would actually ship, not just the
+      # source tree: install the wheel into a throwaway venv and import it.
+      # The resource read is the point - the MCP resources are markdown files
+      # loaded at runtime via importlib.resources, so a packaging change that
+      # drops them breaks the server without breaking a source-tree test run.
+      # There is no --help smoke check because the one console script
+      # (bigfix-root-mcp -> server:main) takes no arguments and goes straight
+      # to serving MCP over stdio.
+      - name: install the built wheel and smoke-import it
+        run: |
+          uv venv "${RUNNER_TEMP}/wheeltest"
+          VIRTUAL_ENV="${RUNNER_TEMP}/wheeltest" uv pip install dist/*.whl
+          "${RUNNER_TEMP}/wheeltest/bin/python" - <<'PY'
+          import importlib.resources as r
+
+          import bigfix_root_mcp
+          from bigfix_root_mcp import server  # noqa: F401  (import side effects register the tools)
+
+          print("version:", bigfix_root_mcp.__version__)
+          for name in ("tool-guide.md", "session-cookbook.md", "client-cookbook.md"):
+              text = (r.files("bigfix_root_mcp") / "resources" / name).read_text()
+              assert len(text) > 500, name
+              print(name, len(text), "bytes")
+          PY
+
+      # cheap, and makes a test run's hashes comparable to any released ones
+      - name: sha256 of the built artifacts
+        run: sha256sum dist/*
