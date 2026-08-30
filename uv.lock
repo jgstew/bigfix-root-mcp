@@ -13,6 +13,9 @@ resolution-markers = [
 exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P7D"
 
+[options.exclude-newer-package]
+bigfix-relevance-analyzer = { timestamp = "0001-01-01T00:00:00Z", span = "PT1H" }
+
 [manifest]
 constraints = [{ name = "fastmcp-slim", specifier = ">=4.0.0b1" }]
 
@@ -172,11 +175,21 @@ wheels = [
 ]
 
 [[package]]
+name = "bigfix-relevance-analyzer"
+version = "1.8.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/41/82/82b286348b95ff347690d5df3023aa962b562d6033f03245863aa7ad3492/bigfix_relevance_analyzer-1.8.3.tar.gz", hash = "sha256:7e8ad6954af462e6818c76d35ba16a4313bd2b52884800c5dd8339f9ed72ccac", size = 727342, upload-time = "2026-08-30T05:05:17.846Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/35/ac/5d19b4e829475907abbed3e19fc17e2dfe926722f20e17dff565086463d7/bigfix_relevance_analyzer-1.8.3-py3-none-any.whl", hash = "sha256:86a6fc0d7694960cd12fe60aedec32378c7516d54313590ece29173f24b900c0", size = 261808, upload-time = "2026-08-30T05:05:16.82Z" },
+]
+
+[[package]]
 name = "bigfix-root-mcp"
 version = "0.1.4"
 source = { editable = "." }
 dependencies = [
     { name = "besapi" },
+    { name = "bigfix-relevance-analyzer" },
     { name = "fastmcp" },
     { name = "lxml" },
     { name = "pydantic" },
@@ -197,6 +210,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "besapi", specifier = ">=4.1.5" },
+    { name = "bigfix-relevance-analyzer", specifier = ">=1.8.3,<2" },
     { name = "fastmcp", specifier = "==4.0.0b1" },
     { name = "lxml" },
     { name = "pydantic" },
