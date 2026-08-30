@@ -126,30 +126,45 @@ Example MCP client config (see [.mcp.json](.mcp.json)):
 
 ## Install / run
 
-Not published to PyPI, so `pip install bigfix-root-mcp` will not find it. Install
-from a [release](https://github.com/jgstew/bigfix-root-mcp/releases) - every
-release since v0.1.3 attaches a wheel and an sdist, with a `SHA256SUMS.txt` to
-check them against:
+Published on [PyPI](https://pypi.org/project/bigfix-root-mcp/). Requires Python 3.11+.
+
+### With uv (preferred)
+
+No install step - `uvx` fetches and runs it in a throwaway environment, which is
+also what the MCP client configuration above uses:
 
 ```bash
-pip install https://github.com/jgstew/bigfix-root-mcp/releases/download/v0.1.3/bigfix_root_mcp-0.1.3-py3-none-any.whl
+uvx bigfix-root-mcp
 ```
 
-(the asset name carries the version, so bump both halves of that URL for a
-newer release)
-
-Or straight from the repository:
+To keep it on `PATH` instead, as a managed tool:
 
 ```bash
-uvx --from git+https://github.com/jgstew/bigfix-root-mcp bigfix-root-mcp
+uv tool install bigfix-root-mcp
+bigfix-root-mcp
 ```
 
-From a checkout ([uv](https://docs.astral.sh/uv/) required, 0.12+):
+### With pip
+
+```bash
+pip install bigfix-root-mcp
+bigfix-root-mcp               # or: python -m bigfix_root_mcp
+```
+
+### From a checkout
+
+[uv](https://docs.astral.sh/uv/) 0.12+ required:
 
 ```bash
 uv sync
 uv run bigfix-root-mcp        # or: uv run python -m bigfix_root_mcp
 ```
+
+### Verifying a download
+
+Every [release](https://github.com/jgstew/bigfix-root-mcp/releases) since v0.1.3
+also attaches the wheel and sdist with a `SHA256SUMS.txt`, checkable with
+`sha256sum -c SHA256SUMS.txt`.
 
 Smoke test against a live root server with MCP Inspector:
 

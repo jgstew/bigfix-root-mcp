@@ -225,8 +225,11 @@ jobs:
       # created at this point: a failure here leaves the GitHub release intact
       # and is re-run by hand, not by re-running the whole workflow.
       #
-      # NOTE: bigfix-root-mcp is not on PyPI yet, so the very first publish also
-      # needs the project name to exist there or a pending publisher configured.
+      # All three were satisfied for the 0.1.4 release, which is the first one
+      # this step actually published. The initial upload needed a *pending*
+      # publisher on PyPI rather than a normal one, since a trusted publisher
+      # can only be attached to a project that already exists; PyPI converted
+      # it to a normal trusted publisher on that first successful publish.
       - name: Publish to PyPI (trusted publishing)
         if: vars.PYPI_PUBLISH == 'true'
         # the explicit globs keep SHA256SUMS.txt (which lives in dist/ too) out
