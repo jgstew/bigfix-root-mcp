@@ -26,7 +26,7 @@ dependencies = [
     # static relevance analysis (advisory pre-flight, analyze_relevance tool);
     # pure stdlib, stdout-silent, safe inside a stdio server
     "bigfix-relevance-analyzer>=1.8.3,<2",
-    "fastmcp==4.0.0b1",
+    "fastmcp==4.0.0b5",
     # imported directly by src/ (besxml.py, errors.py, server.py). They do
     # arrive transitively via besapi/fastmcp today, but a package should
     # depend on what it imports rather than on another package's dependency
