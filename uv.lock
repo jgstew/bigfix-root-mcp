@@ -212,11 +212,11 @@ wheels = [
 
 [[package]]
 name = "bigfix-relevance-analyzer"
-version = "1.10.4"
+version = "1.11.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/86/04/a59641bafd1f02203cc42a724e738da467d80dc6120877908e9c97ffb39a/bigfix_relevance_analyzer-1.10.4.tar.gz", hash = "sha256:174b3741e244b7c8c4e370fb4b4c2563afb1d727a7eb797fd9456b736b62f11d", size = 789654, upload-time = "2026-08-31T10:44:56.999Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d1/ee/960eeb716ea065bcbe821992d9601a5af6f8d058ddf670590f7d14617c0a/bigfix_relevance_analyzer-1.11.2.tar.gz", hash = "sha256:0204eb025791a475b3c9db62daa965ed60a80d06c2e7a6f3bd08235c9aa5f8f1", size = 941596, upload-time = "2026-09-02T03:31:45.915Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f5/a5/98b27c5db1ad4d5ecc569b29bed42ece5637a7aba74b4a3252a3abdbd0ff/bigfix_relevance_analyzer-1.10.4-py3-none-any.whl", hash = "sha256:9b9b2e473531b9fb86f48bc6eac356c82cd76b07294899c5b133a2aa3645077d", size = 283684, upload-time = "2026-08-31T10:44:55.878Z" },
+    { url = "https://files.pythonhosted.org/packages/82/b0/0890fd05868de0159b2f3c1ac04680d00d8f0af53ef9779c70c2ce57a01b/bigfix_relevance_analyzer-1.11.2-py3-none-any.whl", hash = "sha256:13849f8286458aba12de137d3a29e746ec5a8da1a4e8ce67740a95ca0a1c1ea1", size = 294062, upload-time = "2026-09-02T03:31:44.275Z" },
 ]
 
 [[package]]
