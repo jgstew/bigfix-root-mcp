@@ -152,7 +152,7 @@ repos:
         # the runner's GITHUB_TOKEN - see .github/workflows/pre-commit.yaml.
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: eeca16c54e09b4d9a848259e46bae14737944348 # 0.13.5
+    rev: 00eaed0068329eb6ca6bcb8de7b46c372d8d1c19 # 0.13.9
     hooks:
       - id: uv-lock
       # uv-sync is a post-checkout/post-merge/post-rewrite hook, not a
